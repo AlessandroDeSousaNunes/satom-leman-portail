@@ -9,8 +9,11 @@ let sous_reseaux = Resources.*[ Type == "AWS::EC2::Subnet" ]
 let vpcs = Resources.*[ Type == "AWS::EC2::VPC" ]
 
 # 1. Aucun port d'administration (22, 3389) ouvert à 0.0.0.0/0 ou ::/0
-rule pas_admin_ouvert_au_monde when %groupes_securite !empty {
-  %groupes_securite.Properties.SecurityGroupIngress[*] {
+# (un groupe sans règle d'entrée, comme dev-sg, est conforme par construction)
+let groupes_avec_entrees = %groupes_securite[ Properties.SecurityGroupIngress exists ]
+
+rule pas_admin_ouvert_au_monde when %groupes_avec_entrees !empty {
+  %groupes_avec_entrees.Properties.SecurityGroupIngress[*] {
     when CidrIp exists {
       when CidrIp == "0.0.0.0/0" {
         FromPort > 22 or ToPort < 22
@@ -38,8 +41,8 @@ rule pas_admin_ouvert_regles_isolees when %regles_entree !empty {
 }
 
 # 2. Chaque règle d'entrée est décrite
-rule regles_decrites when %groupes_securite !empty {
-  %groupes_securite.Properties.SecurityGroupIngress[*].Description exists
+rule regles_decrites when %groupes_avec_entrees !empty {
+  %groupes_avec_entrees.Properties.SecurityGroupIngress[*].Description exists
   <<Règle d'entrée sans description>>
 }
 

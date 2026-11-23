@@ -36,6 +36,13 @@ Resources:
             Principal: {AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"}
             Action: "kms:*"
             Resource: "*"
+          - Sid: AlarmesCloudWatchVersSns
+            Effect: Allow
+            Principal: {Service: cloudwatch.amazonaws.com}
+            Action: [kms:Decrypt, kms:GenerateDataKey*]
+            Resource: "*"
+            Condition:
+              StringEquals: {aws:SourceAccount: !Ref "AWS::AccountId"}
           - Sid: CloudWatchLogs
             Effect: Allow
             Principal: {Service: !Sub "logs.${AWS::Region}.amazonaws.com"}
@@ -55,6 +62,17 @@ Resources:
     Properties:
       AliasName: !Sub "alias/portail-${Environnement}-${Equipe}"
       TargetKeyId: !Ref CleProjet
+
+  # ---------- Notification de l'equipe d'exploitation (alarmes) ----------
+  SnsExploitation:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "sns-exploitation-portail-${Environnement}-${Equipe}"
+      KmsMasterKeyId: !Ref CleProjet
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
 
   # ---------- Groupes de securite ----------
   SgAlb:
@@ -161,6 +179,9 @@ Resources:
         - {Key: Environnement, Value: !Ref Environnement}
 
 Outputs:
+  SnsExploitation:
+    Value: !Ref SnsExploitation
+    Export: {Name: !Sub "portail-${Environnement}-SnsExploitation"}
   CleProjetArn:
     Value: !GetAtt CleProjet.Arn
     Export: {Name: !Sub "portail-${Environnement}-CleArn"}

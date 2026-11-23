@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprint 7 : deux VPN site a site (Geneve 203.0.113.10, Lausanne
+  198.51.100.20) sur la Transit Gateway, BGP, IKEv2 uniquement. Pre-cles generees dans
+  Secrets Manager (jamais dans le template ni le depot). Alarme CloudWatch sur TunnelState.
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  AvecTgw:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  AvecVpn:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+
+Conditions:
+  CreerVpn: !And [!Equals [!Ref AvecTgw, "true"], !Equals [!Ref AvecVpn, "true"]]
+
+Resources:
+  PreCles:
+    Type: AWS::SecretsManager::Secret
+    Condition: CreerVpn
+    Properties:
+      Name: !Sub "portail/${Environnement}/vpn-pre-cles"
+      Description: Pre-cles IKE des tunnels VPN (generees, jamais versionnees)
+      KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}
+      GenerateSecretString:
+        SecretStringTemplate: '{"site": "geneve-lausanne"}'
+        GenerateStringKey: psk
+        PasswordLength: 40
+        ExcludePunctuation: true
+        ExcludeCharacters: "0"
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  CgwGeneve:
+    Type: AWS::EC2::CustomerGateway
+    Condition: CreerVpn
+    Properties:
+      Type: ipsec.1
+      IpAddress: 203.0.113.10
+      BgpAsn: 65010
+      Tags:
+        - {Key: Name, Value: !Sub "cgw-geneve-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  CgwLausanne:
+    Type: AWS::EC2::CustomerGateway
+    Condition: CreerVpn
+    Properties:
+      Type: ipsec.1
+      IpAddress: 198.51.100.20
+      BgpAsn: 65020
+      Tags:
+        - {Key: Name, Value: !Sub "cgw-lausanne-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  VpnGeneve:
+    Type: AWS::EC2::VPNConnection
+    Condition: CreerVpn
+    Properties:
+      Type: ipsec.1
+      CustomerGatewayId: !Ref CgwGeneve
+      TransitGatewayId: {"Fn::ImportValue": !Sub "portail-${Environnement}-TgwId"}
+      StaticRoutesOnly: false
+      VpnTunnelOptionsSpecifications:
+        - PreSharedKey: !Sub "{{resolve:secretsmanager:${PreCles}:SecretString:psk}}"
+          IKEVersions: [{Value: ikev2}]
+          Phase1EncryptionAlgorithms: [{Value: AES256}]
+          Phase2EncryptionAlgorithms: [{Value: AES256}]
+          Phase1IntegrityAlgorithms: [{Value: SHA2-256}]
+          Phase2IntegrityAlgorithms: [{Value: SHA2-256}]
+          Phase1DHGroupNumbers: [{Value: 20}]
+          Phase2DHGroupNumbers: [{Value: 20}]
+        - PreSharedKey: !Sub "{{resolve:secretsmanager:${PreCles}:SecretString:psk}}"
+          IKEVersions: [{Value: ikev2}]
+          Phase1EncryptionAlgorithms: [{Value: AES256}]
+          Phase2EncryptionAlgorithms: [{Value: AES256}]
+          Phase1IntegrityAlgorithms: [{Value: SHA2-256}]
+          Phase2IntegrityAlgorithms: [{Value: SHA2-256}]
+          Phase1DHGroupNumbers: [{Value: 20}]
+          Phase2DHGroupNumbers: [{Value: 20}]
+      Tags:
+        - {Key: Name, Value: !Sub "vpn-geneve-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  VpnLausanne:
+    Type: AWS::EC2::VPNConnection
+    Condition: CreerVpn
+    Properties:
+      Type: ipsec.1
+      CustomerGatewayId: !Ref CgwLausanne
+      TransitGatewayId: {"Fn::ImportValue": !Sub "portail-${Environnement}-TgwId"}
+      StaticRoutesOnly: false
+      VpnTunnelOptionsSpecifications:
+        - PreSharedKey: !Sub "{{resolve:secretsmanager:${PreCles}:SecretString:psk}}"
+          IKEVersions: [{Value: ikev2}]
+          Phase1EncryptionAlgorithms: [{Value: AES256}]
+          Phase2EncryptionAlgorithms: [{Value: AES256}]
+          Phase1IntegrityAlgorithms: [{Value: SHA2-256}]
+          Phase2IntegrityAlgorithms: [{Value: SHA2-256}]
+          Phase1DHGroupNumbers: [{Value: 20}]
+          Phase2DHGroupNumbers: [{Value: 20}]
+        - PreSharedKey: !Sub "{{resolve:secretsmanager:${PreCles}:SecretString:psk}}"
+          IKEVersions: [{Value: ikev2}]
+          Phase1EncryptionAlgorithms: [{Value: AES256}]
+          Phase2EncryptionAlgorithms: [{Value: AES256}]
+          Phase1IntegrityAlgorithms: [{Value: SHA2-256}]
+          Phase2IntegrityAlgorithms: [{Value: SHA2-256}]
+          Phase1DHGroupNumbers: [{Value: 20}]
+          Phase2DHGroupNumbers: [{Value: 20}]
+      Tags:
+        - {Key: Name, Value: !Sub "vpn-lausanne-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  # Alarme : au moins un tunnel tombe (TunnelState < 1 sur 5 minutes)
+  AlarmeTunnelGeneve:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreerVpn
+    Properties:
+      AlarmName: !Sub "portail-${Environnement}-vpn-geneve-tunnel"
+      AlarmDescription: Tunnel VPN Geneve tombe (voir docs/runbooks/vpn.md)
+      Namespace: AWS/VPN
+      MetricName: TunnelState
+      Dimensions: [{Name: VpnId, Value: !Ref VpnGeneve}]
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+      OKActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+
+  AlarmeTunnelLausanne:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreerVpn
+    Properties:
+      AlarmName: !Sub "portail-${Environnement}-vpn-lausanne-tunnel"
+      AlarmDescription: Tunnel VPN Lausanne tombe (voir docs/runbooks/vpn.md)
+      Namespace: AWS/VPN
+      MetricName: TunnelState
+      Dimensions: [{Name: VpnId, Value: !Ref VpnLausanne}]
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+      OKActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+
+Outputs:
+  VpnGeneve:
+    Condition: CreerVpn
+    Value: !Ref VpnGeneve
+  VpnLausanne:
+    Condition: CreerVpn
+    Value: !Ref VpnLausanne
