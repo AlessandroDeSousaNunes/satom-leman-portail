@@ -12,6 +12,12 @@ Parameters:
     Type: String
     Default: AlessandroDeSousaNunes/satom-leman-portail
     Description: proprietaire/depot autorise a prendre le role
+  DepotGitHubImmuable:
+    Type: String
+    Default: AlessandroDeSousaNunes@260914278/satom-leman-portail@1468484199
+    Description: >
+      proprietaire@id/depot@id, format du claim sub avec identifiants immuables
+      (un depot recree sous le meme nom ne peut pas prendre le role)
   FournisseurOidcExistant:
     Type: String
     Default: ""
@@ -50,6 +56,9 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
                 token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${DepotGitHubImmuable}:ref:refs/heads/main"
+                  - !Sub "repo:${DepotGitHubImmuable}:environment:dev"
+                  - !Sub "repo:${DepotGitHubImmuable}:environment:prod"
                   - !Sub "repo:${DepotGitHub}:ref:refs/heads/main"
                   - !Sub "repo:${DepotGitHub}:environment:dev"
                   - !Sub "repo:${DepotGitHub}:environment:prod"
