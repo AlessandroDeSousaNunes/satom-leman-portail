@@ -81,3 +81,16 @@ rule etiquettes_sous_reseaux when %sous_reseaux !empty {
   %sous_reseaux.Properties.Tags[ Key == "Projet" ] !empty
   %sous_reseaux.Properties.Tags[ Key == "Environnement" ] !empty
 }
+
+# 8. Un nom de groupe de sécurité ne peut pas commencer par "sg-" (refusé par EC2, constat du module 0)
+rule nom_groupe_securite when %groupes_securite !empty {
+  %groupes_securite[ Properties.GroupName exists ] {
+    when Properties.GroupName is_string {
+      Properties.GroupName != /^sg-/
+    }
+    when Properties.GroupName.'Fn::Sub' exists {
+      Properties.GroupName.'Fn::Sub' != /^sg-/
+      <<GroupName commence par sg- : refusé par EC2>>
+    }
+  }
+}

@@ -41,9 +41,20 @@ def parametres_du_template(cfn, corps: str, valeurs: dict[str, str]) -> list[dic
 
 
 def pile_existe(cfn, pile: str) -> bool:
+    """Vrai si la pile existe et peut être mise à jour.
+
+    Une pile en ROLLBACK_COMPLETE (création annulée, aucune ressource) ne peut pas être mise à jour :
+    elle est supprimée puis recréée.
+    """
     try:
         etat = cfn.describe_stacks(StackName=pile)["Stacks"][0]["StackStatus"]
     except ClientError:
+        return False
+    if etat == "ROLLBACK_COMPLETE":
+        print(f"   {pile} en ROLLBACK_COMPLETE (aucune ressource) : suppression avant recreation")
+        cfn.delete_stack(StackName=pile)
+        attente = {"Delay": 10, "MaxAttempts": 60}
+        cfn.get_waiter("stack_delete_complete").wait(StackName=pile, WaiterConfig=attente)
         return False
     return etat != "REVIEW_IN_PROGRESS"
 

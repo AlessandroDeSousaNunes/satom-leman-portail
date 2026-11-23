@@ -60,7 +60,7 @@ Resources:
   SgAlb:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub "sg-alb-portail-${Environnement}-${Equipe}"
+      GroupName: !Sub "alb-sg-portail-${Environnement}-${Equipe}"
       GroupDescription: ALB - HTTPS 443 depuis Internet uniquement
       VpcId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcId"}
       SecurityGroupIngress:
@@ -80,7 +80,7 @@ Resources:
   SgWeb:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub "sg-web-portail-${Environnement}-${Equipe}"
+      GroupName: !Sub "web-sg-portail-${Environnement}-${Equipe}"
       GroupDescription: web - 443 ouvert, 80 et 8080 depuis l ALB, SSH depuis la salle d exploitation
       VpcId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcId"}
       SecurityGroupIngress:
@@ -97,7 +97,7 @@ Resources:
   SgApp:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub "sg-app-portail-${Environnement}-${Equipe}"
+      GroupName: !Sub "app-sg-portail-${Environnement}-${Equipe}"
       GroupDescription: app - 8080 depuis sg-web uniquement
       VpcId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcId"}
       SecurityGroupIngress:
