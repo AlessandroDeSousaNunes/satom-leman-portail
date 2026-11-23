@@ -76,10 +76,14 @@ jobs:
       - uses: actions/setup-python@v7.1.0
         with: {python-version: "${{ env.PYTHON_VERSION }}"}
       - name: Outils
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           pip install checkov pip-audit semgrep
-          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/aws-cloudformation/cloudformation-guard/main/install-guard.sh | sh
-          echo "$HOME/.guard/bin" >> "$GITHUB_PATH"
+          # cfn-guard : version figée, téléchargée par gh authentifié (évite la limite anonyme de l'API GitHub)
+          gh release download 3.3.0 -R aws-cloudformation/cloudformation-guard             --pattern 'cfn-guard-v3-x86_64-linux-latest.tar.gz' -D /tmp/guard
+          tar -xzf /tmp/guard/cfn-guard-v3-x86_64-linux-latest.tar.gz -C /tmp/guard
+          echo "$(dirname "$(find /tmp/guard -type f -name cfn-guard | head -1)")" >> "$GITHUB_PATH"
       - name: cfn-guard (règles du projet)
         run: cfn-guard validate --rules policies/cfn-guard --data templates --show-summary all
       - name: checkov IaC (CloudFormation)
