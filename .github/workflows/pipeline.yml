@@ -1,0 +1,275 @@
+# Pipeline DevSecOps du portail Léman Finance (section 2.1 du TP, 7 étapes).
+# Étapes 1 à 3 : à chaque pull request et à chaque push sur main.
+# Étapes 4 à 7 : sur main seulement, quand la variable de dépôt AWS_DEPLOIEMENT vaut "true"
+# (les ressources AWS facturées à l'heure ne sont créées que pendant les sessions de travail).
+name: pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+  IMAGE: ghcr.io/${{ github.repository_owner }}/satom-leman-portail
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------- 1
+  qualite:
+    name: 1 · Qualité de code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v6
+        with: {python-version: "${{ env.PYTHON_VERSION }}", cache: pip, cache-dependency-path: app/requirements-dev.txt}
+      - name: Dépendances
+        run: pip install -r app/requirements-dev.txt cfn-lint
+      - name: cfn-lint (templates CloudFormation)
+        run: cfn-lint templates/*.yaml
+      - name: ruff (lint et format du code applicatif et des scripts)
+        run: |
+          ruff check app tests scripts --output-format=github
+          ruff format --check app tests scripts
+      - name: Tests unitaires et couverture (seuil 80 %)
+        run: pytest
+      - uses: actions/upload-artifact@v4
+        with: {name: couverture, path: coverage.xml}
+      - name: Analyse SonarQube Cloud et quality gate
+        if: ${{ env.SONAR_TOKEN != '' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.qualitygate.wait=true
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ---------------------------------------------------------------- 2
+  securite:
+    name: 2 · Sécurité statique
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v6
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - name: Outils
+        run: |
+          pip install checkov pip-audit semgrep
+          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/aws-cloudformation/cloudformation-guard/main/install-guard.sh | sh
+          echo "$HOME/.guard/bin" >> "$GITHUB_PATH"
+      - name: cfn-guard (règles du projet)
+        run: cfn-guard validate --rules policies/cfn-guard --data templates --show-summary all
+      - name: checkov IaC (CloudFormation)
+        run: checkov -d templates --framework cloudformation --compact
+      - name: checkov Kubernetes et Dockerfile
+        # Digest d'image injecté à l'étape 4 : CKV_K8S_14/43 vérifiés sur le rendu final (étape 4)
+        run: |
+          checkov -d k8s --framework kubernetes --compact --skip-check CKV_K8S_14,CKV_K8S_43
+          checkov -f Dockerfile --compact
+      - name: Chevauchement des CIDR (sprint 5)
+        run: python scripts/verifier_cidr.py
+      - name: Semgrep (SAST)
+        run: semgrep scan --config p/python --config p/flask --config p/secrets --severity ERROR --error --metrics off app scripts
+      - name: gitleaks (secrets dans le dépôt et l'historique)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+      - name: pip-audit (dépendances Python)
+        run: pip-audit -r app/requirements.txt --strict
+      - name: Trivy (dépendances et configuration)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          skip-dirs: docs
+
+  # ---------------------------------------------------------------- 3
+  construction:
+    name: 3 · Image, SBOM et signature
+    needs: [qualite, securite]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construction (et publication sur main)
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: APP_VERSION=${{ github.sha }}
+          provenance: false
+      - name: Scan Trivy de l'image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: SBOM CycloneDX (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}:${{ github.sha }}
+          format: cyclonedx-json
+          output-file: sbom/portail-${{ github.sha }}.cdx.json
+          upload-artifact: false
+      - uses: actions/upload-artifact@v4
+        with: {name: sbom, path: sbom/}
+      - name: Signature cosign (sans clé, OIDC GitHub)
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+      - name: Signer l'image et attacher le SBOM
+        if: github.event_name != 'pull_request'
+        run: |
+          REF="${IMAGE}@${{ steps.image.outputs.digest }}"
+          cosign sign --yes "$REF"
+          cosign attest --yes --type cyclonedx --predicate "sbom/portail-${GITHUB_SHA}.cdx.json" "$REF"
+          cosign verify "$REF" \
+            --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          echo "Image signée et vérifiée : $REF" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------- 4
+  deploiement-dev:
+    name: 4 · Déploiement dev
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_DEPLOIEMENT == 'true'
+    needs: construction
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Piles CloudFormation par jeu de modifications
+        run: |
+          pip install boto3
+          for t in templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml; do
+            [ -f "$t" ] || continue
+            python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ vars.CFN_ROLE_ARN }}"
+          done
+      - name: Manifestes Kubernetes (digest signé)
+        if: vars.EKS_CLUSTER != ''
+        run: |
+          aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}"
+          cd k8s/overlays/dev
+          kustomize edit set image "${IMAGE}=${IMAGE}@${{ needs.construction.outputs.digest }}"
+          kustomize build . > /tmp/rendu.yaml
+          pip install checkov && checkov -f /tmp/rendu.yaml --framework kubernetes --compact
+          kubectl apply -f /tmp/rendu.yaml
+          kubectl -n portail rollout status deploy/web --timeout=180s
+          kubectl -n portail rollout status deploy/api --timeout=180s
+
+  # ---------------------------------------------------------------- 5
+  tests-dynamiques:
+    name: 5 · Tests dynamiques et performance
+    needs: deploiement-dev
+    # Runner auto-hébergé dans le VPC (les runners GitHub n'atteignent pas les ressources privées)
+    runs-on: [self-hosted, leman-vpc]
+    if: vars.RUNNER_VPC == 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Connectivité
+        run: bash tests/connectivite/verifier.sh "${{ vars.URL_DEV }}"
+      - name: OWASP ZAP baseline (DAST)
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ vars.URL_DEV }}
+          rules_file_name: tests/dast/zap-regles.tsv
+          fail_action: true
+          allow_issue_writing: false
+      - name: Charge k6 et SLO (p95 < 500 ms, erreurs < 0,5 %)
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: tests/charge/portail.js
+          flags: --summary-export=docs/rapports/k6-dev.json
+        env:
+          URL_CIBLE: ${{ vars.URL_DEV }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rapports-dev, path: "docs/rapports/\nreport_html.html"}
+
+  # ---------------------------------------------------------------- 6
+  deploiement-prod:
+    name: 6 · Validation manuelle et prod
+    needs: [deploiement-dev, tests-dynamiques]
+    if: always() && needs.deploiement-dev.result == 'success' && needs.tests-dynamiques.result != 'failure'
+    runs-on: ubuntu-latest
+    environment: prod   # relecteur obligatoire configuré sur l'environnement
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: {python-version: "${{ env.PYTHON_VERSION }}"}
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Piles CloudFormation prod
+        run: |
+          pip install boto3
+          for t in templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml; do
+            [ -f "$t" ] || continue
+            python scripts/deployer.py "$t" parameters/prod.json --role-cfn "${{ vars.CFN_ROLE_ARN }}"
+          done
+
+  # ---------------------------------------------------------------- 7
+  post-deploiement:
+    name: 7 · Vérifications post-déploiement
+    needs: deploiement-prod
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Alarmes, conformité et dérive
+        run: bash scripts/post_deploiement.sh | tee -a "$GITHUB_STEP_SUMMARY"
