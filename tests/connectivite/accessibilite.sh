@@ -26,10 +26,18 @@ mesurer() {
     [ "$etat" != running ] && break
     sleep 5
   done
+  if [ "$etat" != succeeded ]; then
+    # une analyse en échec n'est pas une preuve de blocage : elle est signalée et comptée
+    message=$(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids "$analyse" \
+      --query 'NetworkInsightsAnalyses[0].StatusMessage' --output text | cut -c1-60)
+    printf '%-24s %-6s %-10s %-10s %s\n' "$nom" "$port" "$attendu" "ECHEC" "analyse $etat : $message"
+    ECHECS=$((ECHECS + 1))
+    return
+  fi
   trouve=$(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids "$analyse" \
     --query 'NetworkInsightsAnalyses[0].NetworkPathFound' --output text)
   explication=$(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids "$analyse" \
-    --query 'NetworkInsightsAnalyses[0].Explanations[0].[ExplanationCode,SecurityGroup.Id]' --output text 2>/dev/null | tr '\t' ' ')
+    --query 'NetworkInsightsAnalyses[0].Explanations[0].[ExplanationCode,Component.Id]' --output text 2>/dev/null | tr '\t' ' ')
   [ "$trouve" = True ] && res=joignable || res=bloque
   printf '%-24s %-6s %-10s %-10s %s\n' "$nom" "$port" "$attendu" "$res" "${explication:-chemin complet}"
 }
