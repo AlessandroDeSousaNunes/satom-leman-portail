@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprint 6 : Transit Gateway tgw-leman (ASN 64512), attachements des VPC
+  principal et dev, tables de routage separees par environnement (prod, dev, sites).
+  Facturee a l'heure (attachements) : creee seulement pendant les sessions (AvecTgw).
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  CidrVpc:
+    Type: String
+    AllowedPattern: '^10\.(\d{1,3})\.0\.0/16$'
+  CidrVpcDev:
+    Type: String
+    AllowedPattern: '^10\.(\d{1,3})\.0\.0/16$'
+  AvecTgw:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  ConnexionDev:
+    Type: String
+    AllowedValues: [peering, tgw]
+    Default: peering
+  CidrSites:
+    Type: String
+    Default: 172.16.0.0/15
+    Description: Agregat des reseaux des sites (Geneve 172.16.0.0/16, Lausanne 172.17.0.0/16)
+
+Conditions:
+  CreerTgw: !Equals [!Ref AvecTgw, "true"]
+  DevViaTgw: !And [!Condition CreerTgw, !Equals [!Ref ConnexionDev, tgw]]
+
+Resources:
+  Tgw:
+    Type: AWS::EC2::TransitGateway
+    Condition: CreerTgw
+    Properties:
+      AmazonSideAsn: 64512
+      Description: !Sub "tgw-leman ${Environnement}"
+      DefaultRouteTableAssociation: disable
+      DefaultRouteTablePropagation: disable
+      DnsSupport: enable
+      VpnEcmpSupport: enable
+      AutoAcceptSharedAttachments: disable
+      Tags:
+        - {Key: Name, Value: !Sub "tgw-leman-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  AttachementPrincipal:
+    Type: AWS::EC2::TransitGatewayVpcAttachment
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayId: !Ref Tgw
+      VpcId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcId"}
+      SubnetIds:
+        - {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1a"}
+        - {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1b"}
+      Tags:
+        - {Key: Name, Value: !Sub "tgw-attach-principal-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  AttachementDev:
+    Type: AWS::EC2::TransitGatewayVpcAttachment
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayId: !Ref Tgw
+      VpcId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcDevId"}
+      SubnetIds:
+        - {"Fn::ImportValue": !Sub "portail-${Environnement}-SubDev1a"}
+      Tags:
+        - {Key: Name, Value: !Sub "tgw-attach-dev-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  # ---------- Tables de routage separees ----------
+  # rt-tgw-prod : le VPC principal voit dev et les sites
+  # rt-tgw-dev  : dev ne voit que le VPC principal (jamais les sites)
+  # rt-tgw-sites : les VPN ne voient que le VPC principal (associees au sprint 7)
+  RtTgwProd:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayId: !Ref Tgw
+      Tags:
+        - {Key: Name, Value: !Sub "rt-tgw-prod-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+
+  RtTgwDev:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayId: !Ref Tgw
+      Tags:
+        - {Key: Name, Value: !Sub "rt-tgw-dev-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+
+  RtTgwSites:
+    Type: AWS::EC2::TransitGatewayRouteTable
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayId: !Ref Tgw
+      Tags:
+        - {Key: Name, Value: !Sub "rt-tgw-sites-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+
+  AssocPrincipal:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayAttachmentId: !Ref AttachementPrincipal
+      TransitGatewayRouteTableId: !Ref RtTgwProd
+
+  AssocDev:
+    Type: AWS::EC2::TransitGatewayRouteTableAssociation
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayAttachmentId: !Ref AttachementDev
+      TransitGatewayRouteTableId: !Ref RtTgwDev
+
+  PropagDevVersProd:
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayAttachmentId: !Ref AttachementDev
+      TransitGatewayRouteTableId: !Ref RtTgwProd
+
+  PropagPrincipalVersDev:
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayAttachmentId: !Ref AttachementPrincipal
+      TransitGatewayRouteTableId: !Ref RtTgwDev
+
+  PropagPrincipalVersSites:
+    Type: AWS::EC2::TransitGatewayRouteTablePropagation
+    Condition: CreerTgw
+    Properties:
+      TransitGatewayAttachmentId: !Ref AttachementPrincipal
+      TransitGatewayRouteTableId: !Ref RtTgwSites
+
+  # ---------- Routes des VPC vers la TGW ----------
+  RoutePriveVersSites:
+    Type: AWS::EC2::Route
+    Condition: CreerTgw
+    DependsOn: AttachementPrincipal
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtPrive"}
+      DestinationCidrBlock: !Ref CidrSites
+      TransitGatewayId: !Ref Tgw
+
+  RoutePriveVersDev:
+    Type: AWS::EC2::Route
+    Condition: DevViaTgw
+    DependsOn: AttachementPrincipal
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtPrive"}
+      DestinationCidrBlock: !Ref CidrVpcDev
+      TransitGatewayId: !Ref Tgw
+
+  RouteDevVersPrincipal:
+    Type: AWS::EC2::Route
+    Condition: DevViaTgw
+    DependsOn: AttachementDev
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtDev"}
+      DestinationCidrBlock: !Ref CidrVpc
+      TransitGatewayId: !Ref Tgw
+
+Outputs:
+  TgwId:
+    Condition: CreerTgw
+    Value: !Ref Tgw
+    Export: {Name: !Sub "portail-${Environnement}-TgwId"}
+  RtTgwSites:
+    Condition: CreerTgw
+    Value: !Ref RtTgwSites
+    Export: {Name: !Sub "portail-${Environnement}-RtTgwSites"}
+  RtTgwProd:
+    Condition: CreerTgw
+    Value: !Ref RtTgwProd
+    Export: {Name: !Sub "portail-${Environnement}-RtTgwProd"}
