@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprint 8 (conception et simulation documentee) : passerelle Direct Connect
+  dxgw-leman (ASN 64513) associee a la Transit Gateway. Prefixes annonces filtres : seul le CIDR du
+  VPC principal est annonce vers les sites, aucune route par defaut. Aucune connexion physique (pas de VIF) :
+  voir docs/adr/0004-direct-connect.md.
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  CidrVpc:
+    Type: String
+    AllowedPattern: '^10\.(\d{1,3})\.0\.0/16$'
+  AvecTgw:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  AvecDirectConnect:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+
+Conditions:
+  CreerDx: !And [!Equals [!Ref AvecTgw, "true"], !Equals [!Ref AvecDirectConnect, "true"]]
+
+Resources:
+  PasserelleDx:
+    Type: AWS::DirectConnect::DirectConnectGateway
+    Condition: CreerDx
+    Properties:
+      DirectConnectGatewayName: !Sub "dxgw-leman-${Environnement}-${Equipe}"
+      AmazonSideAsn: "64513"
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  AssociationTgw:
+    Type: AWS::DirectConnect::DirectConnectGatewayAssociation
+    Condition: CreerDx
+    Properties:
+      DirectConnectGatewayId: !GetAtt PasserelleDx.DirectConnectGatewayId
+      AssociatedGatewayId: {"Fn::ImportValue": !Sub "portail-${Environnement}-TgwId"}
+      # Filtrage : seul le VPC principal est annonce aux sites (jamais 0.0.0.0/0)
+      AllowedPrefixesToDirectConnectGateway: [!Ref CidrVpc]
+
+Outputs:
+  PasserelleDxId:
+    Condition: CreerDx
+    Value: !GetAtt PasserelleDx.DirectConnectGatewayId
