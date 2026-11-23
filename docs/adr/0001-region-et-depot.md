@@ -17,5 +17,5 @@ Le dossier de projet demande la région **eu-central-2 (Zurich)** et un dépôt 
 
 - Les résultats restent comparables aux modules précédents (mêmes quotas, même compte).
 - Passer en eu-central-2 se fait en changeant une variable : les templates utilisent `!GetAZs` et des paramètres SSM.
-- Le dépôt public permet SonarQube Cloud gratuit et des minutes GitHub Actions illimitées. Aucun secret n'y est stocké : gitleaks le vérifie à chaque exécution, l'identifiant du compte AWS est une variable de dépôt.
+- Le dépôt public permet SonarQube Cloud gratuit et des minutes GitHub Actions illimitées. Aucun secret n'y est stocké : gitleaks le vérifie à chaque exécution, les ARN des rôles (qui contiennent l'identifiant du compte AWS) sont des secrets du dépôt.
 - **Risque accepté** : écart à la région imposée par la nLPD (données en Suède, dans l'UE et non en Suisse). Acceptable pour un client fictif sans données réelles ; à revoir avant toute donnée réelle. Propriétaire : ADSN. Revue : fin du sprint 13.

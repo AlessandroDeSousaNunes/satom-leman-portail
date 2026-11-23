@@ -5,5 +5,6 @@
   "CidrVpcDev": "10.1.0.0/16",
   "AvecNat": "false",
   "SalleExploitation": "213.55.246.163/32",
-  "RetentionJours": "365"
+  "RetentionJours": "365",
+  "AvecPareFeu": "false"
 }
