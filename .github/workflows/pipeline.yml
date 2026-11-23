@@ -1,6 +1,7 @@
 # Pipeline DevSecOps du portail Léman Finance (section 2.1 du TP, 7 étapes).
 # Étapes 1 à 3 : à chaque pull request et à chaque push sur main.
-# Étapes 4 à 7 : sur main seulement, quand la variable de dépôt AWS_DEPLOIEMENT vaut "true"
+# Étapes 4 et 5 : sur main, quand la variable de dépôt AWS_DEPLOIEMENT vaut "true".
+# Étapes 6 et 7 : sur demande (workflow_dispatch prod=true), après validation du relecteur.
 # (les ressources AWS facturées à l'heure ne sont créées que pendant les sessions de travail).
 name: pipeline
 
@@ -10,6 +11,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      prod:
+        description: Enchaîner sur la mise en prod (validation manuelle du relecteur obligatoire)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -70,10 +76,14 @@ jobs:
       - uses: actions/setup-python@v7.1.0
         with: {python-version: "${{ env.PYTHON_VERSION }}"}
       - name: Outils
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           pip install checkov pip-audit semgrep
-          curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/aws-cloudformation/cloudformation-guard/main/install-guard.sh | sh
-          echo "$HOME/.guard/bin" >> "$GITHUB_PATH"
+          # cfn-guard : version figée, téléchargée par gh authentifié (évite la limite anonyme de l'API GitHub)
+          gh release download 3.3.0 -R aws-cloudformation/cloudformation-guard             --pattern 'cfn-guard-v3-x86_64-linux-latest.tar.gz' -D /tmp/guard
+          tar -xzf /tmp/guard/cfn-guard-v3-x86_64-linux-latest.tar.gz -C /tmp/guard
+          echo "$(dirname "$(find /tmp/guard -type f -name cfn-guard | head -1)")" >> "$GITHUB_PATH"
       - name: cfn-guard (règles du projet)
         run: cfn-guard validate --rules policies/cfn-guard --data templates --show-summary all
       - name: checkov IaC (CloudFormation)
@@ -235,7 +245,10 @@ jobs:
   deploiement-prod:
     name: 6 · Validation manuelle et prod
     needs: [deploiement-dev, tests-dynamiques]
-    if: always() && needs.deploiement-dev.result == 'success' && needs.tests-dynamiques.result != 'failure'
+    # Prod seulement sur demande explicite (workflow_dispatch prod=true), puis validation du relecteur
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' && inputs.prod &&
+      needs.deploiement-dev.result == 'success' && needs.tests-dynamiques.result != 'failure'
     runs-on: ubuntu-latest
     environment: prod   # relecteur obligatoire configuré sur l'environnement
     permissions:
