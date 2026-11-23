@@ -4,6 +4,10 @@ Portail des portefeuilles du **Groupe Léman Finance SA** (client fictif), recon
 
 [![pipeline](https://github.com/AlessandroDeSousaNunes/satom-leman-portail/actions/workflows/pipeline.yml/badge.svg)](https://github.com/AlessandroDeSousaNunes/satom-leman-portail/actions/workflows/pipeline.yml)
 
+## Preuves
+
+Toutes les étapes sont capturées, sprint par sprint : [docs/captures](docs/captures/README.md).
+
 ## Architecture
 
 | Couche | Technologie |
