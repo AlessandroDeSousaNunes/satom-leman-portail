@@ -10,5 +10,6 @@
   "ConnexionDev": "peering",
   "InstancesTest": "true",
   "AvecTgw": "false",
-  "AvecVpn": "false"
+  "AvecVpn": "false",
+  "AvecDirectConnect": "false"
 }

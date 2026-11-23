@@ -16,6 +16,10 @@ on:
         description: Enchaîner sur la mise en prod (validation manuelle du relecteur obligatoire)
         type: boolean
         default: false
+      confirmer_remplacement:
+        description: Confirmer les remplacements annoncés par les jeux de modifications (après relecture)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -194,11 +198,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Piles CloudFormation par jeu de modifications
+        env:
+          CONFIRMER: ${{ inputs.confirmer_remplacement && '--confirmer-remplacement' || '' }}
         run: |
           pip install boto3
           for t in templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml; do
             [ -f "$t" ] || continue
-            python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}"
+            python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}" $CONFIRMER
           done
       - name: Manifestes Kubernetes (digest signé)
         if: vars.EKS_CLUSTER != ''

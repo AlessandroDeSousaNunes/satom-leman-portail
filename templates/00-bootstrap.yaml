@@ -98,6 +98,15 @@ Resources:
                   - config:DescribeComplianceByConfigRule
                   - eks:DescribeCluster
                 Resource: "*"
+              - Sid: AssociationAttachementsVpn
+                Effect: Allow
+                Action:
+                  - ec2:AssociateTransitGatewayRouteTable
+                  - ec2:EnableTransitGatewayRouteTablePropagation
+                  - ec2:GetTransitGatewayRouteTableAssociations
+                Resource: "*"
+                Condition:
+                  StringEquals: {aws:RequestedRegion: !Ref "AWS::Region"}
               - Sid: TransmettreRoleExecution
                 Effect: Allow
                 Action: iam:PassRole
@@ -135,6 +144,7 @@ Resources:
                   - route53:*
                   - cloudfront:*
                   - wafv2:*
+                  - directconnect:*
                   - acm:DescribeCertificate
                   - acm:ListCertificates
                   - eks:*

@@ -1,0 +1,283 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - execution Kubernetes (sprints 9 et 12) : cluster EKS dans les sous-reseaux
+  prives, secrets chiffres par KMS, journaux du plan de controle, NetworkPolicy appliquees par le CNI VPC,
+  groupe de noeuds geres, role Pod Identity de l'AWS Load Balancer Controller.
+  Facture a l'heure : cree seulement pendant les sessions (AvecEks).
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  AvecEks:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  VersionKubernetes:
+    Type: String
+    Default: "1.34"
+  TypeNoeud:
+    Type: String
+    Default: t3.small
+  RoleDeploiementArn:
+    Type: String
+    Default: ""
+    Description: Role GitHub Actions autorise a deployer dans le cluster (entree d'acces EKS)
+
+Conditions:
+  CreerEks: !Equals [!Ref AvecEks, "true"]
+  AvecRoleDeploiement: !And [!Condition CreerEks, !Not [!Equals [!Ref RoleDeploiementArn, ""]]]
+
+Resources:
+  RoleCluster:
+    Type: AWS::IAM::Role
+    Condition: CreerEks
+    Properties:
+      RoleName: !Sub "role-eks-cluster-portail-${Environnement}-${Equipe}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: eks.amazonaws.com}
+            Action: [sts:AssumeRole, sts:TagSession]
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy"
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  RoleNoeuds:
+    Type: AWS::IAM::Role
+    Condition: CreerEks
+    Properties:
+      RoleName: !Sub "role-eks-noeuds-portail-${Environnement}-${Equipe}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKS_CNI_Policy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/CloudWatchAgentServerPolicy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXrayWriteOnlyAccess"
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  GroupeJournauxCluster:
+    Type: AWS::Logs::LogGroup
+    Condition: CreerEks
+    Properties:
+      LogGroupName: !Sub "/aws/eks/eks-portail-${Environnement}-${Equipe}/cluster"
+      RetentionInDays: 30
+      KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}
+
+  Cluster:
+    Type: AWS::EKS::Cluster
+    Condition: CreerEks
+    DependsOn: GroupeJournauxCluster
+    Properties:
+      Name: !Sub "eks-portail-${Environnement}-${Equipe}"
+      Version: !Ref VersionKubernetes
+      RoleArn: !GetAtt RoleCluster.Arn
+      AccessConfig:
+        AuthenticationMode: API
+        BootstrapClusterCreatorAdminPermissions: true
+      EncryptionConfig:
+        - Provider: {KeyArn: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}}
+          Resources: [secrets]
+      Logging:
+        ClusterLogging:
+          EnabledTypes: [{Type: api}, {Type: audit}, {Type: authenticator}]
+      ResourcesVpcConfig:
+        SubnetIds:
+          - {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1a"}
+          - {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1b"}
+        EndpointPrivateAccess: true
+        EndpointPublicAccess: true
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  AccesPipeline:
+    Type: AWS::EKS::AccessEntry
+    Condition: AvecRoleDeploiement
+    Properties:
+      ClusterName: !Ref Cluster
+      PrincipalArn: !Ref RoleDeploiementArn
+      AccessPolicies:
+        - PolicyArn: !Sub "arn:${AWS::Partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          AccessScope: {Type: cluster}
+
+  # CNI VPC avec application des NetworkPolicy (refus par defaut du namespace portail)
+  ModuleCni:
+    Type: AWS::EKS::Addon
+    Condition: CreerEks
+    Properties:
+      ClusterName: !Ref Cluster
+      AddonName: vpc-cni
+      ResolveConflicts: OVERWRITE
+      ConfigurationValues: '{"enableNetworkPolicy": "true"}'
+
+  ModulePodIdentity:
+    Type: AWS::EKS::Addon
+    Condition: CreerEks
+    Properties:
+      ClusterName: !Ref Cluster
+      AddonName: eks-pod-identity-agent
+      ResolveConflicts: OVERWRITE
+
+  Noeuds:
+    Type: AWS::EKS::Nodegroup
+    Condition: CreerEks
+    DependsOn: ModuleCni
+    Properties:
+      ClusterName: !Ref Cluster
+      NodegroupName: !Sub "ng-portail-${Environnement}"
+      NodeRole: !GetAtt RoleNoeuds.Arn
+      InstanceTypes: [!Ref TypeNoeud]
+      AmiType: AL2023_x86_64_STANDARD
+      CapacityType: ON_DEMAND
+      DiskSize: 20
+      ScalingConfig: {MinSize: 2, DesiredSize: 2, MaxSize: 3}
+      UpdateConfig: {MaxUnavailable: 1}
+      Subnets:
+        - {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1a"}
+        - {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1b"}
+      Labels: {projet: satomcloudnetwork}
+      Tags:
+        Name: !Sub "eks-noeud-portail-${Environnement}-${Equipe}"
+        Projet: SatomCloudNetwork
+        Equipe: !Ref Equipe
+        Environnement: !Ref Environnement
+
+  ModuleCoreDns:
+    Type: AWS::EKS::Addon
+    Condition: CreerEks
+    DependsOn: Noeuds
+    Properties:
+      ClusterName: !Ref Cluster
+      AddonName: coredns
+      ResolveConflicts: OVERWRITE
+
+  ModuleKubeProxy:
+    Type: AWS::EKS::Addon
+    Condition: CreerEks
+    Properties:
+      ClusterName: !Ref Cluster
+      AddonName: kube-proxy
+      ResolveConflicts: OVERWRITE
+
+  # ---------- AWS Load Balancer Controller (Pod Identity) ----------
+  RoleControleurAlb:
+    Type: AWS::IAM::Role
+    Condition: CreerEks
+    Properties:
+      RoleName: !Sub "role-alb-controleur-portail-${Environnement}-${Equipe}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: pods.eks.amazonaws.com}
+            Action: [sts:AssumeRole, sts:TagSession]
+      Policies:
+        - PolicyName: aws-load-balancer-controller
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Lecture
+                Effect: Allow
+                Action:
+                  - ec2:Describe*
+                  - ec2:GetCoipPoolUsage
+                  - ec2:GetSecurityGroupsForVpc
+                  - elasticloadbalancing:Describe*
+                  - acm:ListCertificates
+                  - acm:DescribeCertificate
+                  - iam:ListServerCertificates
+                  - iam:GetServerCertificate
+                  - wafv2:GetWebACL
+                  - wafv2:GetWebACLForResource
+                  - shield:GetSubscriptionState
+                Resource: "*"
+              - Sid: RoleLieAuService
+                Effect: Allow
+                Action: iam:CreateServiceLinkedRole
+                Resource: "*"
+                Condition:
+                  StringEquals: {iam:AWSServiceName: elasticloadbalancing.amazonaws.com}
+              - Sid: GroupesSecuriteEtRegles
+                Effect: Allow
+                Action:
+                  - ec2:CreateSecurityGroup
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:DeleteSecurityGroup
+                Resource: "*"
+                Condition:
+                  StringEquals: {aws:RequestedRegion: !Ref "AWS::Region"}
+              - Sid: EquilibreursDuCluster
+                Effect: Allow
+                Action:
+                  - elasticloadbalancing:CreateLoadBalancer
+                  - elasticloadbalancing:CreateTargetGroup
+                  - elasticloadbalancing:CreateListener
+                  - elasticloadbalancing:DeleteListener
+                  - elasticloadbalancing:CreateRule
+                  - elasticloadbalancing:DeleteRule
+                  - elasticloadbalancing:ModifyListener
+                  - elasticloadbalancing:ModifyRule
+                  - elasticloadbalancing:AddTags
+                  - elasticloadbalancing:RemoveTags
+                  - elasticloadbalancing:ModifyLoadBalancerAttributes
+                  - elasticloadbalancing:SetIpAddressType
+                  - elasticloadbalancing:SetSecurityGroups
+                  - elasticloadbalancing:SetSubnets
+                  - elasticloadbalancing:DeleteLoadBalancer
+                  - elasticloadbalancing:ModifyTargetGroup
+                  - elasticloadbalancing:ModifyTargetGroupAttributes
+                  - elasticloadbalancing:DeleteTargetGroup
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:AddListenerCertificates
+                  - elasticloadbalancing:RemoveListenerCertificates
+                  - elasticloadbalancing:SetWebAcl
+                  - wafv2:AssociateWebACL
+                  - wafv2:DisassociateWebACL
+                Resource: "*"
+                Condition:
+                  StringEquals: {aws:RequestedRegion: !Ref "AWS::Region"}
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  AssociationControleurAlb:
+    Type: AWS::EKS::PodIdentityAssociation
+    Condition: CreerEks
+    DependsOn: ModulePodIdentity
+    Properties:
+      ClusterName: !Ref Cluster
+      Namespace: kube-system
+      ServiceAccount: aws-load-balancer-controller
+      RoleArn: !GetAtt RoleControleurAlb.Arn
+
+Outputs:
+  NomCluster:
+    Condition: CreerEks
+    Value: !Ref Cluster
+    Export: {Name: !Sub "portail-${Environnement}-Cluster"}
+  GroupeSecuriteCluster:
+    Condition: CreerEks
+    Value: !GetAtt Cluster.ClusterSecurityGroupId
