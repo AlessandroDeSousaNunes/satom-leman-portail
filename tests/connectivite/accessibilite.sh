@@ -34,7 +34,9 @@ mesurer() {
   printf '%-24s %-6s %-10s %-10s %s\n' "$nom" "$port" "$attendu" "$res" "${explication:-chemin complet}"
 }
 
+ECHECS=0
 mesurer "web-01 -> app-01" "$WEB" "$APP" 8080 joignable
 mesurer "web-01 -> app-01" "$WEB" "$APP" 22 bloque
 mesurer "dev-01 -> app-01" "$DEV" "$APP" 8080 joignable
 mesurer "dev-01 -> web-01" "$DEV" "$WEB" 22 bloque
+[ "$ECHECS" -eq 0 ] || { echo "$ECHECS analyse(s) en échec côté AWS : relancer plus tard"; exit 2; }
