@@ -6,6 +6,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Correctifs de sécurité Debian (ex. zlib CVE-2026-85091 relevée par Trivy sur l'image de base)
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system --gid 10001 portail \
  && useradd --system --uid 10001 --gid portail --home-dir /app --shell /usr/sbin/nologin portail
 
