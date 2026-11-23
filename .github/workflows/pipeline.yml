@@ -20,7 +20,7 @@ concurrency:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
-  IMAGE: ghcr.io/${{ github.repository_owner }}/satom-leman-portail
+  IMAGE: ghcr.io/alessandrodesousanunes/satom-leman-portail  # minuscules obligatoires (OCI)
   PYTHON_VERSION: "3.12"
 
 jobs:
