@@ -181,14 +181,14 @@ jobs:
         with: {python-version: "${{ env.PYTHON_VERSION }}"}
       - uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Piles CloudFormation par jeu de modifications
         run: |
           pip install boto3
           for t in templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml; do
             [ -f "$t" ] || continue
-            python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ vars.CFN_ROLE_ARN }}"
+            python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}"
           done
       - name: Manifestes Kubernetes (digest signé)
         if: vars.EKS_CLUSTER != ''
@@ -247,14 +247,14 @@ jobs:
         with: {python-version: "${{ env.PYTHON_VERSION }}"}
       - uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Piles CloudFormation prod
         run: |
           pip install boto3
           for t in templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml; do
             [ -f "$t" ] || continue
-            python scripts/deployer.py "$t" parameters/prod.json --role-cfn "${{ vars.CFN_ROLE_ARN }}"
+            python scripts/deployer.py "$t" parameters/prod.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}"
           done
 
   # ---------------------------------------------------------------- 7
@@ -269,7 +269,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Alarmes, conformité et dérive
         run: bash scripts/post_deploiement.sh | tee -a "$GITHUB_STEP_SUMMARY"

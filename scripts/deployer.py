@@ -23,6 +23,7 @@ ORDRE = {
     "00-bootstrap": "bootstrap",
     "01-reseau": "reseau",
     "02-securite": "securite",
+    "03-sortie-internet": "sortie-internet",
 }
 
 

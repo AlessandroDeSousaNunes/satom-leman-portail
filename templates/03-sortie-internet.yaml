@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprints 2 et 4 : sortie Internet des sous-reseaux prives.
+  NAT Gateway dans son sous-reseau dedie ; option Network Firewall (politique stateful, liste
+  de domaines autorises, journaux chiffres). Ressources facturees a l'heure : creees seulement
+  pendant les sessions de travail (AvecNat, AvecPareFeu).
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  CidrVpc:
+    Type: String
+    AllowedPattern: '^10\.(\d{1,3})\.0\.0/16$'
+  AvecNat:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  AvecPareFeu:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Network Firewall (environ 0,40 USD par heure), necessite AvecNat
+  DomainesAutorises:
+    Type: CommaDelimitedList
+    Default: ".amazonaws.com,.amazon.com,pypi.org,files.pythonhosted.org,ghcr.io,pkg-containers.githubusercontent.com,.github.com,.docker.io,.cloudfront.net"
+  RetentionJours:
+    Type: Number
+    Default: 30
+    AllowedValues: [30, 90, 180, 365]
+
+Conditions:
+  CreerNat: !Equals [!Ref AvecNat, "true"]
+  CreerPareFeu: !And [!Condition CreerNat, !Equals [!Ref AvecPareFeu, "true"]]
+  NatSansPareFeu: !And [!Condition CreerNat, !Not [!Equals [!Ref AvecPareFeu, "true"]]]
+
+Resources:
+  # ---------- NAT Gateway (sprint 2) ----------
+  EipNat:
+    Type: AWS::EC2::EIP
+    Condition: CreerNat
+    Properties:
+      Domain: vpc
+      Tags:
+        - {Key: Name, Value: !Sub "eip-nat-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  Nat:
+    Type: AWS::EC2::NatGateway
+    Condition: CreerNat
+    Properties:
+      AllocationId: !GetAtt EipNat.AllocationId
+      SubnetId: {"Fn::ImportValue": !Sub "portail-${Environnement}-SubNat1a"}
+      Tags:
+        - {Key: Name, Value: !Sub "nat-portail-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  # Sans pare-feu : prive -> NAT (jamais l'IGW)
+  RoutePriveVersNat:
+    Type: AWS::EC2::Route
+    Condition: NatSansPareFeu
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtPrive"}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref Nat
+
+  # ---------- Network Firewall (sprint 4) ----------
+  GroupeJournauxPareFeuFlux:
+    Type: AWS::Logs::LogGroup
+    Condition: CreerPareFeu
+    Properties:
+      LogGroupName: !Sub "/portail/${Environnement}/pare-feu/flux"
+      RetentionInDays: !Ref RetentionJours
+      KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}
+
+  GroupeJournauxPareFeuAlertes:
+    Type: AWS::Logs::LogGroup
+    Condition: CreerPareFeu
+    Properties:
+      LogGroupName: !Sub "/portail/${Environnement}/pare-feu/alertes"
+      RetentionInDays: !Ref RetentionJours
+      KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}
+
+  RegleDomainesAutorises:
+    Type: AWS::NetworkFirewall::RuleGroup
+    Condition: CreerPareFeu
+    Properties:
+      RuleGroupName: !Sub "rg-domaines-autorises-${Environnement}-${Equipe}"
+      Type: STATEFUL
+      Capacity: 100
+      Description: Sortie HTTP et HTTPS limitee aux domaines necessaires (paquets, AWS, registres)
+      RuleGroup:
+        RuleVariables:
+          IPSets:
+            HOME_NET: {Definition: [!Ref CidrVpc]}
+        RulesSource:
+          RulesSourceList:
+            GeneratedRulesType: ALLOWLIST
+            TargetTypes: [TLS_SNI, HTTP_HOST]
+            Targets: !Ref DomainesAutorises
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  PolitiquePareFeu:
+    Type: AWS::NetworkFirewall::FirewallPolicy
+    Condition: CreerPareFeu
+    Properties:
+      FirewallPolicyName: !Sub "policy-portail-${Environnement}-${Equipe}"
+      FirewallPolicy:
+        StatelessDefaultActions: ["aws:forward_to_sfe"]
+        StatelessFragmentDefaultActions: ["aws:forward_to_sfe"]
+        StatefulRuleGroupReferences:
+          - ResourceArn: !Ref RegleDomainesAutorises
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  PareFeu:
+    Type: AWS::NetworkFirewall::Firewall
+    Condition: CreerPareFeu
+    Properties:
+      FirewallName: !Sub "nfw-portail-${Environnement}-${Equipe}"
+      FirewallPolicyArn: !Ref PolitiquePareFeu
+      VpcId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcId"}
+      SubnetMappings:
+        - SubnetId: {"Fn::ImportValue": !Sub "portail-${Environnement}-SubFw1a"}
+      DeleteProtection: false
+      Tags:
+        - {Key: Name, Value: !Sub "nfw-portail-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  JournalisationPareFeu:
+    Type: AWS::NetworkFirewall::LoggingConfiguration
+    Condition: CreerPareFeu
+    Properties:
+      FirewallArn: !Ref PareFeu
+      LoggingConfiguration:
+        LogDestinationConfigs:
+          - LogType: FLOW
+            LogDestinationType: CloudWatchLogs
+            LogDestination: {logGroup: !Ref GroupeJournauxPareFeuFlux}
+          - LogType: ALERT
+            LogDestinationType: CloudWatchLogs
+            LogDestination: {logGroup: !Ref GroupeJournauxPareFeuAlertes}
+
+  # Avec pare-feu : prive -> pare-feu -> NAT -> IGW, et retour NAT -> pare-feu -> prive
+  RoutePriveVersPareFeu:
+    Type: AWS::EC2::Route
+    Condition: CreerPareFeu
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtPrive"}
+      DestinationCidrBlock: 0.0.0.0/0
+      VpcEndpointId: !Select [1, !Split [":", !Select [0, !GetAtt PareFeu.EndpointIds]]]
+
+  RoutePareFeuVersNat:
+    Type: AWS::EC2::Route
+    Condition: CreerPareFeu
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtFw"}
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref Nat
+
+  RetourNatVersPrive1a:
+    Type: AWS::EC2::Route
+    Condition: CreerPareFeu
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtNat"}
+      DestinationCidrBlock: !Select [2, !Cidr [!Ref CidrVpc, 256, 8]]
+      VpcEndpointId: !Select [1, !Split [":", !Select [0, !GetAtt PareFeu.EndpointIds]]]
+
+  RetourNatVersPrive1b:
+    Type: AWS::EC2::Route
+    Condition: CreerPareFeu
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtNat"}
+      DestinationCidrBlock: !Select [6, !Cidr [!Ref CidrVpc, 256, 8]]
+      VpcEndpointId: !Select [1, !Split [":", !Select [0, !GetAtt PareFeu.EndpointIds]]]
+
+Outputs:
+  NatId:
+    Condition: CreerNat
+    Value: !Ref Nat
+  IpPubliqueNat:
+    Condition: CreerNat
+    Value: !Ref EipNat
+  PareFeuPointTerminaison:
+    Condition: CreerPareFeu
+    Value: !Select [1, !Split [":", !Select [0, !GetAtt PareFeu.EndpointIds]]]

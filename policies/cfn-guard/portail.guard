@@ -43,11 +43,11 @@ rule regles_decrites when %groupes_securite !empty {
   <<Règle d'entrée sans description>>
 }
 
-# 3. Une route vers l'Internet Gateway n'est autorisée que dans la table publique
+# 3. Une route vers l'Internet Gateway n'est autorisée que dans les tables publique et NAT (jamais la table privée)
 rule igw_seulement_table_publique when %routes !empty {
   %routes[ Properties.GatewayId exists ] {
-    Properties.RouteTableId.Ref == "RtPublic"
-    <<Route vers l'IGW hors de la table publique>>
+    Properties.RouteTableId.Ref in ["RtPublic", "RtNat"]
+    <<Route vers l'IGW hors des tables publique et NAT>>
   }
 }
 
