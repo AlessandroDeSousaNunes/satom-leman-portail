@@ -1,5 +1,5 @@
 # Image unique du portail : SERVICE=web (port 8080) ou SERVICE=api (port 8080).
-FROM python:3.12-slim AS base
+FROM python:3.15-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
