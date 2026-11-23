@@ -6,5 +6,9 @@
   "AvecNat": "false",
   "SalleExploitation": "213.55.246.163/32",
   "RetentionJours": "30",
-  "AvecPareFeu": "false"
+  "AvecPareFeu": "false",
+  "ConnexionDev": "peering",
+  "InstancesTest": "true",
+  "AvecTgw": "false",
+  "AvecVpn": "false"
 }

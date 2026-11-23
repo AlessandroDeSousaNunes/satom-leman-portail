@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprint 5 : VPC de developpement vpc-dev-leman, peering vers le VPC
+  principal, routes limitees au CIDR homologue (aucune route par defaut). Instances de test
+  optionnelles (web-01, app-01, dev-01) pour les mesures VPC Reachability Analyzer.
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  CidrVpc:
+    Type: String
+    AllowedPattern: '^10\.(\d{1,3})\.0\.0/16$'
+  CidrVpcDev:
+    Type: String
+    AllowedPattern: '^10\.(\d{1,3})\.0\.0/16$'
+  ConnexionDev:
+    Type: String
+    AllowedValues: [peering, tgw]
+    Default: peering
+    Description: peering (sprint 5) ou tgw (sprint 6, les routes de peering sont alors retirees)
+  InstancesTest:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Conditions:
+  ViaPeering: !Equals [!Ref ConnexionDev, peering]
+  AvecInstances: !Equals [!Ref InstancesTest, "true"]
+
+Resources:
+  VpcDev:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref CidrVpcDev
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - {Key: Name, Value: !Sub "vpc-dev-leman-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  SubDev1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcDev
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [1, !Cidr [!Ref CidrVpcDev, 256, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - {Key: Name, Value: !Sub "sub-dev-1a-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  RtDev:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcDev
+      Tags:
+        - {Key: Name, Value: !Sub "rt-dev-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  AssocDev1a:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {RouteTableId: !Ref RtDev, SubnetId: !Ref SubDev1a}
+
+  SgDev:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "sg-dev-portail-${Environnement}-${Equipe}"
+      GroupDescription: dev-01 - aucune entree, sortie vers le VPC principal seulement
+      VpcId: !Ref VpcDev
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 0, ToPort: 65535, CidrIp: !Ref CidrVpc, Description: vers-vpc-principal}
+      Tags:
+        - {Key: Name, Value: !Sub "sg-dev-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  # sg-app accepte aussi 8080 depuis le VPC dev (sprint 5 : dev-01 joint app-01 sur 8080)
+  AppDepuisDev:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: {"Fn::ImportValue": !Sub "portail-${Environnement}-SgApp"}
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      CidrIp: !Ref CidrVpcDev
+      Description: api-depuis-vpc-dev
+
+  # ---------- Peering et routes ciblees ----------
+  Peering:
+    Type: AWS::EC2::VPCPeeringConnection
+    Condition: ViaPeering
+    Properties:
+      VpcId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcId"}
+      PeerVpcId: !Ref VpcDev
+      Tags:
+        - {Key: Name, Value: !Sub "pcx-prod-dev-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  RoutePriveVersDev:
+    Type: AWS::EC2::Route
+    Condition: ViaPeering
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtPrive"}
+      DestinationCidrBlock: !Ref CidrVpcDev
+      VpcPeeringConnectionId: !Ref Peering
+
+  RoutePublicVersDev:
+    Type: AWS::EC2::Route
+    Condition: ViaPeering
+    Properties:
+      RouteTableId: {"Fn::ImportValue": !Sub "portail-${Environnement}-RtPublic"}
+      DestinationCidrBlock: !Ref CidrVpcDev
+      VpcPeeringConnectionId: !Ref Peering
+
+  RouteDevVersPrincipal:
+    Type: AWS::EC2::Route
+    Condition: ViaPeering
+    Properties:
+      RouteTableId: !Ref RtDev
+      DestinationCidrBlock: !Ref CidrVpc
+      VpcPeeringConnectionId: !Ref Peering
+
+  # ---------- Instances de test (mesures du sprint 5) ----------
+  Web01:
+    Type: AWS::EC2::Instance
+    Condition: AvecInstances
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.micro
+      SubnetId: {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPublic1a"}
+      PrivateIpAddress: !Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpc]], ".1.10"]]
+      SecurityGroupIds: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SgWeb"}]
+      Monitoring: true
+      EbsOptimized: true
+      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 8, VolumeType: gp3, Encrypted: true, KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}}
+      Tags:
+        - {Key: Name, Value: !Sub "web-01-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  App01:
+    Type: AWS::EC2::Instance
+    Condition: AvecInstances
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.micro
+      SubnetId: {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1a"}
+      PrivateIpAddress: !Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpc]], ".2.10"]]
+      SecurityGroupIds: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SgApp"}]
+      Monitoring: true
+      EbsOptimized: true
+      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 8, VolumeType: gp3, Encrypted: true, KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}}
+      Tags:
+        - {Key: Name, Value: !Sub "app-01-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  Dev01:
+    Type: AWS::EC2::Instance
+    Condition: AvecInstances
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.micro
+      SubnetId: !Ref SubDev1a
+      PrivateIpAddress: !Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpcDev]], ".1.10"]]
+      SecurityGroupIds: [!Ref SgDev]
+      Monitoring: true
+      EbsOptimized: true
+      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 8, VolumeType: gp3, Encrypted: true, KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}}
+      Tags:
+        - {Key: Name, Value: !Sub "dev-01-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+Outputs:
+  VpcDevId:
+    Value: !Ref VpcDev
+    Export: {Name: !Sub "portail-${Environnement}-VpcDevId"}
+  SubDev1a:
+    Value: !Ref SubDev1a
+    Export: {Name: !Sub "portail-${Environnement}-SubDev1a"}
+  RtDev:
+    Value: !Ref RtDev
+    Export: {Name: !Sub "portail-${Environnement}-RtDev"}
+  PeeringId:
+    Condition: ViaPeering
+    Value: !Ref Peering
+  Web01:
+    Condition: AvecInstances
+    Value: !Ref Web01
+  App01:
+    Condition: AvecInstances
+    Value: !Ref App01
+  Dev01:
+    Condition: AvecInstances
+    Value: !Ref Dev01
