@@ -1,0 +1,83 @@
+# Règles cfn-guard du portail Léman (section 3.2 du TP).
+
+let groupes_securite = Resources.*[ Type == "AWS::EC2::SecurityGroup" ]
+let regles_entree = Resources.*[ Type == "AWS::EC2::SecurityGroupIngress" ]
+let routes = Resources.*[ Type == "AWS::EC2::Route" ]
+let groupes_journaux = Resources.*[ Type == "AWS::Logs::LogGroup" ]
+let cles_kms = Resources.*[ Type == "AWS::KMS::Key" ]
+let sous_reseaux = Resources.*[ Type == "AWS::EC2::Subnet" ]
+let vpcs = Resources.*[ Type == "AWS::EC2::VPC" ]
+
+# 1. Aucun port d'administration (22, 3389) ouvert à 0.0.0.0/0 ou ::/0
+rule pas_admin_ouvert_au_monde when %groupes_securite !empty {
+  %groupes_securite.Properties.SecurityGroupIngress[*] {
+    when CidrIp exists {
+      when CidrIp == "0.0.0.0/0" {
+        FromPort > 22 or ToPort < 22
+        <<Port 22 ouvert à 0.0.0.0/0>>
+        FromPort > 3389 or ToPort < 3389
+        <<Port 3389 ouvert à 0.0.0.0/0>>
+      }
+    }
+    when CidrIpv6 exists {
+      CidrIpv6 != "::/0"
+      <<Règle IPv6 ouverte au monde>>
+    }
+    IpProtocol != "-1"
+    <<Tous les protocoles ouverts>>
+  }
+}
+
+rule pas_admin_ouvert_regles_isolees when %regles_entree !empty {
+  %regles_entree.Properties {
+    when CidrIp == "0.0.0.0/0" {
+      FromPort > 22 or ToPort < 22
+      FromPort > 3389 or ToPort < 3389
+    }
+  }
+}
+
+# 2. Chaque règle d'entrée est décrite
+rule regles_decrites when %groupes_securite !empty {
+  %groupes_securite.Properties.SecurityGroupIngress[*].Description exists
+  <<Règle d'entrée sans description>>
+}
+
+# 3. Une route vers l'Internet Gateway n'est autorisée que dans la table publique
+rule igw_seulement_table_publique when %routes !empty {
+  %routes[ Properties.GatewayId exists ] {
+    Properties.RouteTableId.Ref == "RtPublic"
+    <<Route vers l'IGW hors de la table publique>>
+  }
+}
+
+# 4. Aucun sous-réseau n'attribue d'IP publique automatiquement
+rule pas_ip_publique_auto when %sous_reseaux !empty {
+  %sous_reseaux.Properties.MapPublicIpOnLaunch == false
+  <<MapPublicIpOnLaunch doit être false>>
+}
+
+# 5. Journaux chiffrés par KMS avec rétention définie (nLPD)
+rule journaux_chiffres when %groupes_journaux !empty {
+  %groupes_journaux.Properties.KmsKeyId exists
+  <<Groupe de journaux non chiffré>>
+  %groupes_journaux.Properties.RetentionInDays exists
+  <<Rétention non définie>>
+}
+
+# 6. Rotation des clés KMS
+rule rotation_kms when %cles_kms !empty {
+  %cles_kms.Properties.EnableKeyRotation == true
+}
+
+# 7. Étiquettes obligatoires sur VPC et sous-réseaux
+rule etiquettes_obligatoires when %vpcs !empty {
+  %vpcs.Properties.Tags[ Key == "Projet" ] !empty
+  %vpcs.Properties.Tags[ Key == "Equipe" ] !empty
+  %vpcs.Properties.Tags[ Key == "Environnement" ] !empty
+}
+
+rule etiquettes_sous_reseaux when %sous_reseaux !empty {
+  %sous_reseaux.Properties.Tags[ Key == "Projet" ] !empty
+  %sous_reseaux.Properties.Tags[ Key == "Environnement" ] !empty
+}

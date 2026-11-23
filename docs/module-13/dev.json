@@ -1,0 +1,6 @@
+[
+  {"ParameterKey": "Environnement", "ParameterValue": "dev"},
+  {"ParameterKey": "CidrVpc", "ParameterValue": "10.20.0.0/16"},
+  {"ParameterKey": "Equipe", "ParameterValue": "ADSN"},
+  {"ParameterKey": "DeployerInstances", "ParameterValue": "false"}
+]

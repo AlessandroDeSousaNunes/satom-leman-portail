@@ -1,0 +1,9 @@
+{
+  "Environnement": "dev",
+  "Equipe": "ADSN",
+  "CidrVpc": "10.10.0.0/16",
+  "CidrVpcDev": "10.11.0.0/16",
+  "AvecNat": "false",
+  "SalleExploitation": "213.55.246.163/32",
+  "RetentionJours": "30"
+}
