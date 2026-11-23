@@ -206,6 +206,8 @@ jobs:
             [ -f "$t" ] || continue
             python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}" $CONFIRMER
           done
+      - name: Associations TGW des VPN et de Direct Connect (sprints 7 et 8)
+        run: bash scripts/associer_tgw.sh dev
       - name: Manifestes Kubernetes (digest signé)
         if: vars.EKS_CLUSTER != ''
         run: |
