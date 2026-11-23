@@ -1,0 +1,313 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Satom Cloud Network - Groupe Leman Finance SA (ADSN). Module 13 :
+  reseau (VPC, sous-reseaux, IGW, table publique), securite (sg-alb, sg-web, sg-app),
+  calcul (web-01, app-01, optionnelles) et equilibrage (tg-web, tg-app, ALB HTTPS 443, regle /api/*).
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [prod, dev]
+    Default: dev
+    Description: Environnement deploye (prod ou dev)
+  CidrVpc:
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: '^(\d{1,3})\.(\d{1,3})\.0\.0/16$'
+    Description: CIDR du VPC (/16)
+  Equipe:
+    Type: String
+    Default: ADSN
+  SalleExploitation:
+    Type: String
+    Default: 213.55.246.163/32
+    Description: Adresse autorisee en SSH
+  CertificatArn:
+    Type: String
+    Default: ""
+    Description: ARN ACM du certificat de l'ecouteur HTTPS (vide = pas d'ALB)
+  DeployerInstances:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Creer web-01 et app-01 (depend du quota de vCPU du compte)
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Conditions:
+  AvecAlb: !Not [!Equals [!Ref CertificatArn, ""]]
+  AvecInstances: !Equals [!Ref DeployerInstances, "true"]
+
+Resources:
+  # ---------- Reseau (TP1) ----------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref CidrVpc
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - {Key: Name, Value: !Sub "vpc-${Environnement}-leman-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  SubPublic1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [1, !Cidr [!Ref CidrVpc, 8, 8]]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - {Key: Name, Value: !Sub "sub-public-1a-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  SubPublic1b:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [5, !Cidr [!Ref CidrVpc, 8, 8]]
+      Tags:
+        - {Key: Name, Value: !Sub "sub-public-1b-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  SubPrive1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [2, !Cidr [!Ref CidrVpc, 8, 8]]
+      Tags:
+        - {Key: Name, Value: !Sub "sub-prive-1a-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - {Key: Name, Value: !Sub "igw-${Environnement}-leman-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  IgwAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref Igw
+
+  RtPublic:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - {Key: Name, Value: !Sub "rt-public-leman-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  RouteInternet:
+    Type: AWS::EC2::Route
+    DependsOn: IgwAttachement
+    Properties:
+      RouteTableId: !Ref RtPublic
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref Igw
+
+  AssocPublic1a:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {RouteTableId: !Ref RtPublic, SubnetId: !Ref SubPublic1a}
+
+  AssocPublic1b:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {RouteTableId: !Ref RtPublic, SubnetId: !Ref SubPublic1b}
+
+  # ---------- Securite (TP1) ----------
+  SgAlb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "alb-sg-cfn-${Equipe}"
+      GroupDescription: ALB - HTTPS 443 depuis Internet
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: https-public}
+      Tags:
+        - {Key: Name, Value: !Sub "sg-alb-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  SgWeb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "web-sg-cfn-${Equipe}"
+      GroupDescription: web-01 - 443 ouvert, 80 limite a ALB, SSH salle exploitation
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: https-public}
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref SgAlb, Description: http-depuis-alb}
+        - {IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref SalleExploitation, Description: ssh-salle-exploitation}
+      Tags:
+        - {Key: Name, Value: !Sub "sg-web-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  SgApp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "app-sg-cfn-${Equipe}"
+      GroupDescription: app-01 - 8080 depuis ALB et web-01
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !Ref SgAlb, Description: api-depuis-alb}
+        - {IpProtocol: tcp, FromPort: 8080, ToPort: 8080, SourceSecurityGroupId: !Ref SgWeb, Description: api-depuis-web}
+      Tags:
+        - {Key: Name, Value: !Sub "sg-app-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  # ---------- Calcul (TP2, optionnel) ----------
+  Web01:
+    Type: AWS::EC2::Instance
+    Condition: AvecInstances
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.micro
+      SubnetId: !Ref SubPublic1a
+      PrivateIpAddress: !Select [0, !Split ["/", !Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpc]], ".1.10/x"]]]]
+      SecurityGroupIds: [!Ref SgWeb]
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          mkdir -p /opt/web && cd /opt/web
+          echo "<h1>web-01 (CloudFormation) - portail Leman</h1>" > index.html
+          echo "OK web-01" > health
+          nohup python3 -m http.server 80 >/dev/null 2>&1 &
+      Tags:
+        - {Key: Name, Value: !Sub "web-01-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  App01:
+    Type: AWS::EC2::Instance
+    Condition: AvecInstances
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.micro
+      SubnetId: !Ref SubPrive1a
+      PrivateIpAddress: !Select [0, !Split ["/", !Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpc]], ".2.10/x"]]]]
+      SecurityGroupIds: [!Ref SgApp]
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          mkdir -p /opt/app/api && cd /opt/app
+          echo "OK app-01" > api/health
+          nohup python3 -m http.server 8080 >/dev/null 2>&1 &
+      Tags:
+        - {Key: Name, Value: !Sub "app-01-cfn-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  # ---------- Equilibrage (TP2) ----------
+  TgWeb:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: AvecAlb
+    Properties:
+      Name: !Sub "tg-web-cfn-${Equipe}"
+      VpcId: !Ref Vpc
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckPath: /health
+      Targets: !If [AvecInstances, [{Id: !Ref Web01, Port: 80}], !Ref "AWS::NoValue"]
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  TgApp:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: AvecAlb
+    Properties:
+      Name: !Sub "tg-app-cfn-${Equipe}"
+      VpcId: !Ref Vpc
+      Protocol: HTTP
+      Port: 8080
+      TargetType: instance
+      HealthCheckPath: /api/health
+      Targets: !If [AvecInstances, [{Id: !Ref App01, Port: 8080}], !Ref "AWS::NoValue"]
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Condition: AvecAlb
+    DependsOn: RouteInternet
+    Properties:
+      Name: !Sub "alb-${Environnement}-leman-cfn-${Equipe}"
+      Scheme: internet-facing
+      Type: application
+      Subnets: [!Ref SubPublic1a, !Ref SubPublic1b]
+      SecurityGroups: [!Ref SgAlb]
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+        - {Key: Module, Value: "13"}
+
+  EcouteurHttps:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: AvecAlb
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Protocol: HTTPS
+      Port: 443
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates: [{CertificateArn: !Ref CertificatArn}]
+      DefaultActions: [{Type: forward, TargetGroupArn: !Ref TgWeb}]
+
+  RegleApi:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: AvecAlb
+    Properties:
+      ListenerArn: !Ref EcouteurHttps
+      Priority: 10
+      Conditions: [{Field: path-pattern, PathPatternConfig: {Values: ["/api/*"]}}]
+      Actions: [{Type: forward, TargetGroupArn: !Ref TgApp}]
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+  SgWebId:
+    Value: !Ref SgWeb
+  AlbDns:
+    Condition: AvecAlb
+    Value: !GetAtt Alb.DNSName

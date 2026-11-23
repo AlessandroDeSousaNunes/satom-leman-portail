@@ -1,0 +1,182 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - gate G0 : confiance OIDC GitHub -> IAM, role de deploiement de la pipeline
+  (moindre privilege, CloudFormation uniquement) et role d'execution CloudFormation (permissions infra).
+  Deploye une seule fois a la main par l'administrateur ; tout le reste passe par la pipeline.
+
+Parameters:
+  Equipe:
+    Type: String
+    Default: ADSN
+  DepotGitHub:
+    Type: String
+    Default: AlessandroDeSousaNunes/satom-leman-portail
+    Description: proprietaire/depot autorise a prendre le role
+  FournisseurOidcExistant:
+    Type: String
+    Default: ""
+    Description: ARN du fournisseur OIDC token.actions.githubusercontent.com s'il existe deja dans le compte (vide = le creer)
+
+Conditions:
+  CreerFournisseur: !Equals [!Ref FournisseurOidcExistant, ""]
+
+Resources:
+  FournisseurOidc:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreerFournisseur
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+
+  # Role pris par GitHub Actions : ne peut que piloter CloudFormation sur les piles portail-*
+  # et transmettre le role d'execution ci-dessous. Aucune cle d'acces longue duree.
+  RoleDeploiement:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "role-gha-portail-${Equipe}"
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If [CreerFournisseur, !Ref FournisseurOidc, !Ref FournisseurOidcExistant]
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${DepotGitHub}:ref:refs/heads/main"
+                  - !Sub "repo:${DepotGitHub}:environment:dev"
+                  - !Sub "repo:${DepotGitHub}:environment:prod"
+      Policies:
+        - PolicyName: piloter-cloudformation
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PilesDuPortail
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:DetectStackDrift
+                  - cloudformation:DescribeStackResourceDrifts
+                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/portail-*/*"
+              - Sid: LectureGenerale
+                Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ListExports
+                  - cloudformation:DescribeStackDriftDetectionStatus
+                  - ec2:Describe*
+                  - elasticloadbalancing:Describe*
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:GetMetricData
+                  - securityhub:GetFindings
+                  - config:DescribeComplianceByConfigRule
+                  - eks:DescribeCluster
+                Resource: "*"
+              - Sid: TransmettreRoleExecution
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt RoleExecutionCfn.Arn
+                Condition:
+                  StringEquals: {iam:PassedToService: cloudformation.amazonaws.com}
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+
+  # Role utilise par CloudFormation lui-meme pour creer l'infrastructure du portail.
+  RoleExecutionCfn:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "role-cfn-portail-${Equipe}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: cloudformation.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {aws:SourceAccount: !Ref "AWS::AccountId"}
+      Policies:
+        - PolicyName: infrastructure-portail
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ServicesReseauEtCalcul
+                Effect: Allow
+                Action:
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - network-firewall:*
+                  - route53:*
+                  - cloudfront:*
+                  - wafv2:*
+                  - acm:DescribeCertificate
+                  - acm:ListCertificates
+                  - eks:*
+                  - logs:*
+                  - cloudwatch:*
+                  - sns:*
+                  - kms:*
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                  - ssm:GetParameters
+                  - xray:*
+                Resource: "*"
+                Condition:
+                  StringEquals: {aws:RequestedRegion: [!Ref "AWS::Region", us-east-1]}
+              - Sid: RolesDuPortailSeulement
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:CreateServiceLinkedRole
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:CreateOpenIDConnectProvider
+                  - iam:DeleteOpenIDConnectProvider
+                  - iam:GetOpenIDConnectProvider
+                  - iam:TagOpenIDConnectProvider
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*portail*"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*portail*"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/*"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/oidc.eks.*"
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+
+Outputs:
+  RoleDeploiementArn:
+    Description: A mettre dans la variable AWS_ROLE_ARN du depot GitHub
+    Value: !GetAtt RoleDeploiement.Arn
+  RoleExecutionCfnArn:
+    Description: A mettre dans la variable CFN_ROLE_ARN du depot GitHub
+    Value: !GetAtt RoleExecutionCfn.Arn
