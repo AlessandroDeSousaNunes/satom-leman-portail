@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+labels:
+  - pairs: {environnement: prod}
+    includeSelectors: false
+images:
+  - name: ghcr.io/alessandrodesousanunes/satom-leman-portail
+    newTag: latest
+patches:
+  - target: {kind: Ingress, name: portail}
+    patch: |-
+      - op: add
+        path: /metadata/annotations/alb.ingress.kubernetes.io~1load-balancer-name
+        value: alb-prod-leman-ADSN
+      - op: add
+        path: /metadata/annotations/alb.ingress.kubernetes.io~1tags
+        value: Projet=SatomCloudNetwork,Equipe=ADSN,Environnement=prod
+  - target: {kind: Deployment}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/1/value
+        value: prod

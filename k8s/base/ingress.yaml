@@ -1,0 +1,27 @@
+# Ingress lu par l'AWS Load Balancer Controller : il crée l'ALB HTTPS du sprint 9
+# (écouteur 443, TLS 1.2 minimum, règle /api/* vers l'API, journaux d'accès).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: portail
+  namespace: portail
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/group.name: portail-leman
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: {name: api, port: {number: 8080}}
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: web, port: {number: 80}}

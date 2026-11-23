@@ -1,0 +1,67 @@
+# Équivalent Kubernetes des groupes de sécurité sg-web / sg-app du sprint 3 :
+# tout est refusé par défaut, puis seuls les flux attendus sont ouverts.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: refus-par-defaut
+  namespace: portail
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# DNS interne autorisé pour tous les pods du namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: autoriser-dns
+  namespace: portail
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# web : joignable depuis l'ALB (sous-réseaux publics du VPC) sur 8080, peut appeler l'API
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web
+  namespace: portail
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: web}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - ipBlock: {cidr: 10.0.0.0/16}
+      ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: api}
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+# api : joignable seulement depuis web et depuis l'ALB (règle /api/*), port 8080
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api
+  namespace: portail
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: api}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: web}
+        - ipBlock: {cidr: 10.0.0.0/16}
+      ports:
+        - {protocol: TCP, port: 8080}
