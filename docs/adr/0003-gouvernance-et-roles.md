@@ -20,3 +20,4 @@ Le TP demande une relecture de chaque pull request par un autre membre, une auth
 
 - Aucune clé d'accès longue durée : rien à faire tourner, rien à fuiter.
 - Une pull request d'un fork ne peut pas prendre le rôle (condition `sub` sur le dépôt et la branche).
+- **Constat du 23.11** : GitHub émet désormais le claim `sub` avec les identifiants immuables du propriétaire et du dépôt (`repo:AlessandroDeSousaNunes@260914278/satom-leman-portail@1468484199:environment:dev`). Le premier déploiement a été refusé (`Not authorized to perform sts:AssumeRoleWithWebIdentity`) ; le diagnostic du jeton a montré ce format, la condition du rôle l'accepte maintenant. Avantage : un dépôt supprimé puis recréé sous le même nom ne peut pas prendre le rôle.
