@@ -10,6 +10,6 @@
   "ConnexionDev": "tgw",
   "InstancesTest": "true",
   "AvecTgw": "true",
-  "AvecVpn": "false",
+  "AvecVpn": "true",
   "AvecDirectConnect": "false"
 }
