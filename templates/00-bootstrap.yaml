@@ -132,26 +132,43 @@ Resources:
                   - ecr:DescribeImages
                   - ecr:DescribeImageScanFindings
                 Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/portail-*"
+              - Sid: FichiersStatiques
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:ListBucket, s3:DeleteObject]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::portail-*"
+                  - !Sub "arn:${AWS::Partition}:s3:::portail-*/*"
+              - Sid: ChiffrementFichiersStatiques
+                Effect: Allow
+                Action: [kms:GenerateDataKey, kms:Decrypt]
+                Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals: {kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"}
+              - Sid: CloudFrontInvalidation
+                Effect: Allow
+                Action: [cloudfront:CreateInvalidation, cloudfront:GetDistribution, cloudfront:GetInvalidation]
+                Resource: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"
+              - Sid: LectureWafEtMetriques
+                Effect: Allow
+                Action: [wafv2:GetWebACL, wafv2:GetSampledRequests, cloudwatch:GetMetricStatistics]
+                Resource: "*"
               - Sid: CertificatIngress
                 Effect: Allow
-                Action:
-                  - acm:ImportCertificate
-                  - acm:AddTagsToCertificate
-                  - acm:ListCertificates
-                  - acm:DescribeCertificate
-                  - acm:ListTagsForCertificate
+                Action: [acm:ImportCertificate, acm:AddTagsToCertificate, acm:DescribeCertificate, acm:ListTagsForCertificate]
+                Resource: !Sub "arn:${AWS::Partition}:acm:${AWS::Region}:${AWS::AccountId}:certificate/*"
+              - Sid: ListeCertificats
+                Effect: Allow
+                Action: acm:ListCertificates
                 Resource: "*"
-                Condition:
-                  StringEquals: {aws:RequestedRegion: !Ref "AWS::Region"}
               - Sid: AssociationAttachementsVpn
                 Effect: Allow
                 Action:
                   - ec2:AssociateTransitGatewayRouteTable
                   - ec2:EnableTransitGatewayRouteTablePropagation
                   - ec2:GetTransitGatewayRouteTableAssociations
-                Resource: "*"
-                Condition:
-                  StringEquals: {aws:RequestedRegion: !Ref "AWS::Region"}
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway-route-table/*"
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway-attachment/*"
               - Sid: TransmettreRoleExecution
                 Effect: Allow
                 Action: iam:PassRole
@@ -220,6 +237,12 @@ Resources:
                 Effect: Allow
                 Action: secretsmanager:GetRandomPassword
                 Resource: "*"
+              - Sid: BucketsDuPortail
+                Effect: Allow
+                Action: "s3:*"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::portail-*"
+                  - !Sub "arn:${AWS::Partition}:s3:::portail-*/*"
               - Sid: RolesDuPortailSeulement
                 Effect: Allow
                 Action:
@@ -232,6 +255,10 @@ Resources:
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
                   - iam:GetRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListInstanceProfilesForRole
+                  - iam:UpdateAssumeRolePolicy
                   - iam:AttachRolePolicy
                   - iam:DetachRolePolicy
                   - iam:CreateServiceLinkedRole

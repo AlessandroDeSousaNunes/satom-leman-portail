@@ -13,5 +13,6 @@
   "AvecVpn": "false",
   "AvecDirectConnect": "false",
   "AvecEks": "false",
-  "AvecDns": "false"
+  "AvecDns": "false",
+  "AvecCloudFront": "false"
 }
