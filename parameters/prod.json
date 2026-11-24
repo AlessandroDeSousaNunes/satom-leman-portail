@@ -11,5 +11,6 @@
   "InstancesTest": "false",
   "AvecTgw": "false",
   "AvecVpn": "false",
-  "AvecDirectConnect": "false"
+  "AvecDirectConnect": "false",
+  "AvecEks": "false"
 }

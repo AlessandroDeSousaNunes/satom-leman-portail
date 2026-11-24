@@ -193,6 +193,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: read
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.1.0
@@ -206,7 +207,10 @@ jobs:
           CONFIRMER: ${{ inputs.confirmer_remplacement && '--confirmer-remplacement' || '' }}
           # démontage en fin de session : ordre inverse (les piles qui importent une sortie partent avant)
           ORDRE: ${{ inputs.ordre_inverse && 'inverse' || 'normal' }}
+          # paramètre sensible (contient le numéro de compte) : fourni par les secrets, jamais par le dépôt
+          PARAM_RoleDeploiementArn: ${{ secrets.AWS_ROLE_ARN }}
         run: |
+          echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
           pip install boto3
           piles=$(ls templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml 2>/dev/null | sort)
           [ "$ORDRE" = inverse ] && piles=$(echo "$piles" | sort -r)
@@ -216,17 +220,42 @@ jobs:
           done
       - name: Associations TGW des VPN et de Direct Connect (sprints 7 et 8)
         run: bash scripts/associer_tgw.sh dev
-      - name: Manifestes Kubernetes (digest signé)
-        if: vars.EKS_CLUSTER != ''
+      - name: Kubernetes (contrôleur ALB, certificat, application au digest signé)
+        env:
+          CLUSTER: eks-portail-dev-ADSN
+          DIGEST: ${{ needs.construction.outputs.digest }}
         run: |
-          aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER }}"
+          echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+          if ! aws eks describe-cluster --name "$CLUSTER" > /dev/null 2>&1; then
+            echo "pas de cluster $CLUSTER (AvecEks=false) : étape ignorée"; exit 0
+          fi
+          # copie de l'image signée GHCR -> ECR privé (manifeste copié tel quel : même digest, même signature)
+          ECR=$(aws cloudformation list-exports --query "Exports[?Name=='portail-dev-DepotImages'].Value" --output text)
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin > /dev/null
+          aws ecr get-login-password | docker login "${ECR%%/*}" -u AWS --password-stdin > /dev/null
+          docker buildx imagetools create -t "${ECR}:${GITHUB_SHA}" "${IMAGE}@${DIGEST}"
+          docker buildx imagetools inspect "${ECR}:${GITHUB_SHA}" --format '{{json .Manifest.Digest}}'
+          aws eks update-kubeconfig --name "$CLUSTER" > /dev/null
+          VPC=$(aws cloudformation list-exports --query "Exports[?Name=='portail-dev-VpcId'].Value" --output text)
+          helm repo add eks https://aws.github.io/eks-charts > /dev/null && helm repo update eks > /dev/null
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller --version 3.6.3 \
+            -n kube-system --set clusterName="$CLUSTER" --set region="$AWS_REGION" --set vpcId="$VPC" \
+            --set serviceAccount.create=true --set serviceAccount.name=aws-load-balancer-controller --wait --timeout 6m
+          CERT=$(bash scripts/certificat.sh dev)
           cd k8s/overlays/dev
-          kustomize edit set image "${IMAGE}=${IMAGE}@${{ needs.construction.outputs.digest }}"
-          kustomize build . > /tmp/rendu.yaml
-          pip install checkov && checkov -f /tmp/rendu.yaml --framework kubernetes --compact
+          kustomize edit set image "${IMAGE}=${ECR}@${DIGEST}"
+          kustomize build . | sed "s#CERTIFICAT_ARN#${CERT}#" > /tmp/rendu.yaml
+          pip install -q checkov && checkov -f /tmp/rendu.yaml --framework kubernetes --compact --quiet
           kubectl apply -f /tmp/rendu.yaml
-          kubectl -n portail rollout status deploy/web --timeout=180s
-          kubectl -n portail rollout status deploy/api --timeout=180s
+          kubectl -n portail rollout status deploy/web --timeout=300s
+          kubectl -n portail rollout status deploy/api --timeout=300s
+          for i in $(seq 1 40); do
+            HOTE=$(kubectl -n portail get ingress portail -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            [ -n "$HOTE" ] && break; sleep 15
+          done
+          echo "ALB : https://$HOTE" | tee -a "$GITHUB_STEP_SUMMARY"
+          for i in $(seq 1 30); do curl -skf "https://$HOTE/api/health" && break; sleep 10; done
+          echo; bash ../../../tests/connectivite/verifier.sh "https://$HOTE" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------- 5
   tests-dynamiques:

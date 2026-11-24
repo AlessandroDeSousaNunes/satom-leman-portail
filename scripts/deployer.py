@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -70,6 +71,9 @@ def changements_dangereux(changements: list[dict]) -> list[str]:
 
 def deployer(template: Path, fichier_parametres: Path, role_cfn: str | None, confirmer: bool) -> int:
     valeurs = json.loads(fichier_parametres.read_text(encoding="utf-8"))
+    # Paramètres sensibles (ARN contenant le numéro de compte) : variables PARAM_<Cle> de la pipeline,
+    # jamais écrits dans le dépôt
+    valeurs.update({k[len("PARAM_") :]: v for k, v in os.environ.items() if k.startswith("PARAM_")})
     environnement = valeurs["Environnement"]
     pile = nom_pile(template, environnement)
     corps = template.read_text(encoding="utf-8")
