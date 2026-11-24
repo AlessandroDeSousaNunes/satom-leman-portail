@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprint 12 : tableau de bord, alarmes (5xx, latence p95, cibles non saines) vers le
+  sujet SNS d'exploitation, groupe X-Ray. Les runbooks des alarmes critiques sont dans docs/runbooks/.
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  AlbNomComplet:
+    Type: String
+    Default: ""
+    Description: Dimension LoadBalancer de l'ALB (app/alb-.../id), fournie par la pipeline
+  EmailExploitation:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Adresse de l'equipe d'exploitation (secret de la pipeline, jamais dans le depot)
+
+Conditions:
+  AvecAlb: !Not [!Equals [!Ref AlbNomComplet, ""]]
+  AvecEmail: !Not [!Equals [!Ref EmailExploitation, ""]]
+
+Resources:
+  AbonnementExploitation:
+    Type: AWS::SNS::Subscription
+    Condition: AvecEmail
+    Properties:
+      TopicArn: {"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}
+      Protocol: email
+      Endpoint: !Ref EmailExploitation
+
+  Alarme5xx:
+    Type: AWS::CloudWatch::Alarm
+    Condition: AvecAlb
+    Properties:
+      AlarmName: !Sub "portail-${Environnement}-alb-5xx"
+      AlarmDescription: Erreurs 5xx des cibles du portail (runbook docs/runbooks/alb-5xx.md)
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions: [{Name: LoadBalancer, Value: !Ref AlbNomComplet}]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+      OKActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+
+  AlarmeLatence:
+    Type: AWS::CloudWatch::Alarm
+    Condition: AvecAlb
+    Properties:
+      AlarmName: !Sub "portail-${Environnement}-alb-latence-p95"
+      AlarmDescription: Latence p95 au-dessus du SLO de 500 ms (runbook docs/runbooks/alb-latence.md)
+      Namespace: AWS/ApplicationELB
+      MetricName: TargetResponseTime
+      Dimensions: [{Name: LoadBalancer, Value: !Ref AlbNomComplet}]
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 0.5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+      OKActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+
+  AlarmeCiblesNonSaines:
+    Type: AWS::CloudWatch::Alarm
+    Condition: AvecAlb
+    Properties:
+      AlarmName: !Sub "portail-${Environnement}-alb-cibles-non-saines"
+      AlarmDescription: Au moins une cible non saine derriere l'ALB (runbook docs/runbooks/alb-cibles.md)
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Dimensions:
+        - {Name: LoadBalancer, Value: !Ref AlbNomComplet}
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+      OKActions: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SnsExploitation"}]
+
+  TableauDeBord:
+    Type: AWS::CloudWatch::Dashboard
+    Condition: AvecAlb
+    Properties:
+      DashboardName: !Sub "portail-${Environnement}-${Equipe}"
+      DashboardBody: !Sub
+        - |
+          {"widgets": [
+            {"type": "metric", "x": 0, "y": 0, "width": 12, "height": 6, "properties": {
+              "title": "Latence ALB p95 / p99 (SLO 500 ms / 1 s)", "region": "${AWS::Region}", "period": 60,
+              "metrics": [["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${Alb}", {"stat": "p95"}],
+                          ["...", {"stat": "p99"}]]}},
+            {"type": "metric", "x": 12, "y": 0, "width": 12, "height": 6, "properties": {
+              "title": "Requêtes et erreurs 5xx", "region": "${AWS::Region}", "period": 60, "stat": "Sum",
+              "metrics": [["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${Alb}"],
+                          [".", "HTTPCode_Target_5XX_Count", ".", "."],
+                          [".", "HTTPCode_ELB_5XX_Count", ".", "."]]}},
+            {"type": "metric", "x": 0, "y": 6, "width": 12, "height": 6, "properties": {
+              "title": "Cibles saines / non saines", "region": "${AWS::Region}", "period": 60, "stat": "Maximum",
+              "metrics": [["AWS/ApplicationELB", "HealthyHostCount", "LoadBalancer", "${Alb}"],
+                          [".", "UnHealthyHostCount", ".", "."]]}},
+            {"type": "alarm", "x": 12, "y": 6, "width": 12, "height": 6, "properties": {
+              "title": "Alarmes du portail",
+              "alarms": ["${A5xx}", "${ALat}", "${ACib}"]}}
+          ]}
+        - Alb: !Ref AlbNomComplet
+          A5xx: !GetAtt Alarme5xx.Arn
+          ALat: !GetAtt AlarmeLatence.Arn
+          ACib: !GetAtt AlarmeCiblesNonSaines.Arn
+
+  GroupeTraces:
+    Type: AWS::XRay::Group
+    Properties:
+      GroupName: !Sub "portail-${Environnement}-${Equipe}"
+      FilterExpression: !Sub 'annotation.projet = "satom-leman" AND annotation.environnement = "${Environnement}"'
+      InsightsConfiguration: {InsightsEnabled: true, NotificationsEnabled: false}
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+Outputs:
+  TableauDeBord:
+    Condition: AvecAlb
+    Value: !Sub "portail-${Environnement}-${Equipe}"
