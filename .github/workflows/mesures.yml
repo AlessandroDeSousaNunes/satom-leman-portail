@@ -9,7 +9,7 @@ on:
       mesure:
         description: Mesure à exécuter
         type: choice
-        options: [etat, sondes, tgw, vpn, direct-connect, eks]
+        options: [etat, sondes, tgw, vpn, direct-connect, eks, dns, bascule-dns]
         default: etat
 
 permissions:
@@ -44,6 +44,8 @@ jobs:
             vpn)             bash tests/connectivite/vpn.sh dev ;;
             direct-connect)  bash tests/connectivite/direct_connect.sh dev ;;
             eks)             bash tests/connectivite/eks.sh dev ;;
+            dns)             bash tests/connectivite/dns.sh dev ;;
+            bascule-dns)     bash tests/connectivite/dns.sh dev bascule ;;
           esac 2>&1 | sed -E "s/$COMPTE/<compte>/g" | tee "docs/rapports/mesure-${{ inputs.mesure }}.txt"
       - uses: actions/upload-artifact@v7.0.2
         with:

@@ -68,9 +68,14 @@ rule journaux_chiffres when %groupes_journaux !empty {
   <<Rétention non définie>>
 }
 
-# 6. Rotation des clés KMS
+# 6. Rotation des clés KMS symétriques (une clé asymétrique, comme la clé DNSSEC, ne la supporte pas)
 rule rotation_kms when %cles_kms !empty {
-  %cles_kms.Properties.EnableKeyRotation == true
+  %cles_kms[*] {
+    when Properties.KeySpec !exists {
+      Properties.EnableKeyRotation == true
+      <<Rotation désactivée sur une clé symétrique>>
+    }
+  }
 }
 
 # 7. Étiquettes obligatoires sur VPC et sous-réseaux

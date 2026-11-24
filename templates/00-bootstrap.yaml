@@ -82,7 +82,10 @@ Resources:
                   - cloudformation:GetTemplate
                   - cloudformation:DetectStackDrift
                   - cloudformation:DescribeStackResourceDrifts
-                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/portail-*/*"
+                # région principale et us-east-1 (clé DNSSEC, certificats et WAF de CloudFront)
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/portail-*/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:us-east-1:${AWS::AccountId}:stack/portail-*/*"
               - Sid: LectureGenerale
                 Effect: Allow
                 Action:
@@ -108,6 +111,10 @@ Resources:
                   - logs:StartQuery
                   - logs:GetQueryResults
                   - logs:FilterLogEvents
+                  - route53:GetHostedZone
+                  - route53:ListResourceRecordSets
+                  - route53:GetDNSSEC
+                  - route53:GetHealthCheckStatus
                 Resource: "*"
               - Sid: JetonEcr
                 Effect: Allow
