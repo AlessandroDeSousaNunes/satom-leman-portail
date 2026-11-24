@@ -17,7 +17,7 @@ for v in $(aws ec2 describe-vpn-connections --filters $f --query 'VpnConnections
     --query 'TransitGatewayAttachments[0].[TransitGatewayAttachmentId,Association.TransitGatewayRouteTableId,Association.State]' --output text | sed 's/^/   attachement TGW, table, etat : /'
 done
 echo "== Pré-clés : secret Secrets Manager créé par la pile (la valeur n'est jamais lue ni affichée)"
-aws cloudformation describe-stack-resource --stack-name "portail-${ENV}-vpn" --logical-resource-id PreCles   --query 'StackResourceDetail.[ResourceType,PhysicalResourceId,ResourceStatus]' --output text | sed -E 's/-[A-Za-z0-9]{6}$//'
+aws cloudformation describe-stack-resources --stack-name "portail-${ENV}-vpn" --logical-resource-id PreCles --query 'StackResources[0].[ResourceType,PhysicalResourceId,ResourceStatus]' --output text | sed -E 's/-[A-Za-z0-9]{6}$//'
 echo "== Alarmes TunnelState"
 aws cloudwatch describe-alarms --alarm-name-prefix "portail-${ENV}-vpn" \
   --query 'MetricAlarms[].[AlarmName,StateValue,StateReason]' --output text | cut -c1-160
