@@ -146,6 +146,27 @@ Resources:
       SubnetId: {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPublic1a"}
       PrivateIpAddress: !Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpc]], ".1.10"]]
       SecurityGroupIds: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SgWeb"}]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #cloud-boothook
+            #!/bin/bash
+            # (boothook : rejoue a chaque demarrage, donc aussi apres une mise a jour de la pile)
+            # Sonde de connectivite reelle (sprints 3, 5, 6) : resultat dans la console serie
+            cat > /usr/local/bin/sonde.sh <<'FIN'
+            #!/bin/bash
+            while true; do
+              for cible in "$@"; do
+                hote=${!cible%:*}; port=${!cible#*:}
+                if timeout 3 bash -c "</dev/tcp/$hote/$port" 2>/dev/null; then r=OUVERT; else r=FERME; fi
+                echo "SONDE $(date -u +%H:%M) $(hostname -s) -> $hote:$port $r" > /dev/console
+              done
+              sleep 60
+            done
+            FIN
+            chmod +x /usr/local/bin/sonde.sh
+            systemd-run --unit=sonde-portail /usr/local/bin/sonde.sh ${Prefixe}.2.10:8080 ${Prefixe}.2.10:22 
+          - {Prefixe: !Select [0, !Split [".0.0/16", !Ref CidrVpc]]}
       Monitoring: true
       EbsOptimized: true
       MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
@@ -167,6 +188,13 @@ Resources:
       SubnetId: {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1a"}
       PrivateIpAddress: !Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpc]], ".2.10"]]
       SecurityGroupIds: [{"Fn::ImportValue": !Sub "portail-${Environnement}-SgApp"}]
+      UserData:
+        Fn::Base64: |
+          #cloud-boothook
+          #!/bin/bash
+          # app-01 ecoute sur 8080 (cible des sondes de web-01 et dev-01) ; sshd ecoute deja sur 22
+          systemd-run --unit=serveur-8080 python3 -m http.server 8080 --directory /tmp
+          echo "SERVEUR app-01 a l'ecoute sur 8080" > /dev/console
       Monitoring: true
       EbsOptimized: true
       MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
@@ -188,6 +216,27 @@ Resources:
       SubnetId: !Ref SubDev1a
       PrivateIpAddress: !Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpcDev]], ".1.10"]]
       SecurityGroupIds: [!Ref SgDev]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #cloud-boothook
+            #!/bin/bash
+            # (boothook : rejoue a chaque demarrage, donc aussi apres une mise a jour de la pile)
+            # Sonde de connectivite reelle (sprints 3, 5, 6) : resultat dans la console serie
+            cat > /usr/local/bin/sonde.sh <<'FIN'
+            #!/bin/bash
+            while true; do
+              for cible in "$@"; do
+                hote=${!cible%:*}; port=${!cible#*:}
+                if timeout 3 bash -c "</dev/tcp/$hote/$port" 2>/dev/null; then r=OUVERT; else r=FERME; fi
+                echo "SONDE $(date -u +%H:%M) $(hostname -s) -> $hote:$port $r" > /dev/console
+              done
+              sleep 60
+            done
+            FIN
+            chmod +x /usr/local/bin/sonde.sh
+            systemd-run --unit=sonde-portail /usr/local/bin/sonde.sh ${Prefixe}.2.10:8080 ${Prefixe}.1.10:22 
+          - {Prefixe: !Select [0, !Split [".0.0/16", !Ref CidrVpc]]}
       Monitoring: true
       EbsOptimized: true
       MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
