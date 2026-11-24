@@ -61,6 +61,7 @@ Resources:
                 kms:EncryptionContext:aws:logs:arn:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/portail/*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/eks/eks-portail-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:aws-waf-logs-portail-*"
       Tags:
         - {Key: Name, Value: !Sub "kms-portail-${Environnement}-${Equipe}"}
         - {Key: Projet, Value: SatomCloudNetwork}
