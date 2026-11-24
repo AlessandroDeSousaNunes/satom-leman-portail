@@ -33,6 +33,9 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          # numéro de compte lu à l'exécution puis masqué dans la sortie (jamais écrit dans le dépôt)
+          COMPTE=$(aws sts get-caller-identity --query Account --output text)
+          echo "::add-mask::$COMPTE"
           mkdir -p docs/rapports
           case "${{ inputs.mesure }}" in
             etat)            bash tests/connectivite/etat.sh dev ;;
@@ -41,7 +44,7 @@ jobs:
             vpn)             bash tests/connectivite/vpn.sh dev ;;
             direct-connect)  bash tests/connectivite/direct_connect.sh dev ;;
             eks)             bash tests/connectivite/eks.sh dev ;;
-          esac 2>&1 | sed -E 's/[0-9]{12}/<compte>/g' | tee "docs/rapports/mesure-${{ inputs.mesure }}.txt"
+          esac 2>&1 | sed -E "s/$COMPTE/<compte>/g" | tee "docs/rapports/mesure-${{ inputs.mesure }}.txt"
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: mesure-${{ inputs.mesure }}
