@@ -170,6 +170,21 @@ Resources:
                 Resource: "*"
                 Condition:
                   StringEquals: {aws:RequestedRegion: [!Ref "AWS::Region", us-east-1]}
+              - Sid: SecretsDuPortailSeulement
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:UpdateSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:UntagResource
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:portail/*"
+              - Sid: GenerationDePreCles
+                Effect: Allow
+                Action: secretsmanager:GetRandomPassword
+                Resource: "*"
               - Sid: RolesDuPortailSeulement
                 Effect: Allow
                 Action:
