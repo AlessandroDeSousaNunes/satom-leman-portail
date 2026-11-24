@@ -1,0 +1,46 @@
+# Mesures des sprints (lecture seule), lancées à la demande :
+#   gh workflow run mesures -f mesure=sondes
+# Le résultat est affiché dans le journal et archivé comme artefact (docs/rapports).
+name: mesures
+
+on:
+  workflow_dispatch:
+    inputs:
+      mesure:
+        description: Mesure à exécuter
+        type: choice
+        options: [etat, sondes, tgw, vpn, direct-connect, eks]
+        default: etat
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  mesure:
+    name: Mesure ${{ inputs.mesure }}
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Mesure
+        run: |
+          mkdir -p docs/rapports
+          case "${{ inputs.mesure }}" in
+            etat)            bash tests/connectivite/etat.sh dev ;;
+            sondes)          bash tests/connectivite/sondes.sh dev 6 ;;
+            tgw)             bash tests/connectivite/tgw.sh dev ;;
+            vpn)             bash tests/connectivite/vpn.sh dev ;;
+            direct-connect)  bash tests/connectivite/direct_connect.sh dev ;;
+            eks)             bash tests/connectivite/eks.sh dev ;;
+          esac 2>&1 | sed -E 's/[0-9]{12}/<compte>/g' | tee "docs/rapports/mesure-${{ inputs.mesure }}.txt"
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: mesure-${{ inputs.mesure }}
+          path: docs/rapports/

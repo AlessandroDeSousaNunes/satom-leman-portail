@@ -97,6 +97,17 @@ Resources:
                   - securityhub:GetFindings
                   - config:DescribeComplianceByConfigRule
                   - eks:DescribeCluster
+                  - eks:ListClusters
+                  - ec2:GetConsoleOutput
+                  - ec2:SearchTransitGatewayRoutes
+                  - ec2:GetTransitGatewayRouteTablePropagations
+                  - network-firewall:Describe*
+                  - network-firewall:List*
+                  - directconnect:Describe*
+                  - cloudwatch:DescribeAlarmHistory
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:FilterLogEvents
                 Resource: "*"
               - Sid: AssociationAttachementsVpn
                 Effect: Allow
