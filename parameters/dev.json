@@ -7,9 +7,9 @@
   "SalleExploitation": "213.55.246.163/32",
   "RetentionJours": "30",
   "AvecPareFeu": "false",
-  "ConnexionDev": "peering",
+  "ConnexionDev": "tgw",
   "InstancesTest": "true",
-  "AvecTgw": "false",
+  "AvecTgw": "true",
   "AvecVpn": "false",
   "AvecDirectConnect": "false"
 }
