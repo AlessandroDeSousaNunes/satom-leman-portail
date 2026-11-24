@@ -141,39 +141,34 @@ Resources:
               - Sid: ChiffrementFichiersStatiques
                 Effect: Allow
                 Action: [kms:GenerateDataKey, kms:Decrypt]
-                Resource: "*"
+                Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
                 Condition:
                   StringEquals: {kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"}
-              - Sid: CloudFrontInvalidationEtLecture
+              - Sid: CloudFrontInvalidation
                 Effect: Allow
-                Action:
-                  - cloudfront:CreateInvalidation
-                  - cloudfront:GetDistribution
-                  - cloudfront:GetInvalidation
-                  - wafv2:GetWebACL
-                  - wafv2:GetSampledRequests
-                  - cloudwatch:GetMetricStatistics
+                Action: [cloudfront:CreateInvalidation, cloudfront:GetDistribution, cloudfront:GetInvalidation]
+                Resource: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"
+              - Sid: LectureWafEtMetriques
+                Effect: Allow
+                Action: [wafv2:GetWebACL, wafv2:GetSampledRequests, cloudwatch:GetMetricStatistics]
                 Resource: "*"
               - Sid: CertificatIngress
                 Effect: Allow
-                Action:
-                  - acm:ImportCertificate
-                  - acm:AddTagsToCertificate
-                  - acm:ListCertificates
-                  - acm:DescribeCertificate
-                  - acm:ListTagsForCertificate
+                Action: [acm:ImportCertificate, acm:AddTagsToCertificate, acm:DescribeCertificate, acm:ListTagsForCertificate]
+                Resource: !Sub "arn:${AWS::Partition}:acm:${AWS::Region}:${AWS::AccountId}:certificate/*"
+              - Sid: ListeCertificats
+                Effect: Allow
+                Action: acm:ListCertificates
                 Resource: "*"
-                Condition:
-                  StringEquals: {aws:RequestedRegion: !Ref "AWS::Region"}
               - Sid: AssociationAttachementsVpn
                 Effect: Allow
                 Action:
                   - ec2:AssociateTransitGatewayRouteTable
                   - ec2:EnableTransitGatewayRouteTablePropagation
                   - ec2:GetTransitGatewayRouteTableAssociations
-                Resource: "*"
-                Condition:
-                  StringEquals: {aws:RequestedRegion: !Ref "AWS::Region"}
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway-route-table/*"
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:transit-gateway-attachment/*"
               - Sid: TransmettreRoleExecution
                 Effect: Allow
                 Action: iam:PassRole
