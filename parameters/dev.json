@@ -9,7 +9,7 @@
   "AvecPareFeu": "false",
   "ConnexionDev": "tgw",
   "InstancesTest": "true",
-  "AvecTgw": "true",
-  "AvecVpn": "true",
-  "AvecDirectConnect": "true"
+  "AvecTgw": "false",
+  "AvecVpn": "false",
+  "AvecDirectConnect": "false"
 }
