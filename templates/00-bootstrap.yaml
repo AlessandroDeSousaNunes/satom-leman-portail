@@ -109,6 +109,22 @@ Resources:
                   - logs:GetQueryResults
                   - logs:FilterLogEvents
                 Resource: "*"
+              - Sid: JetonEcr
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: EnvoiImagesPortail
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                  - ecr:BatchGetImage
+                  - ecr:DescribeImages
+                  - ecr:DescribeImageScanFindings
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/portail-*"
               - Sid: CertificatIngress
                 Effect: Allow
                 Action:
@@ -167,6 +183,7 @@ Resources:
                   - cloudfront:*
                   - wafv2:*
                   - directconnect:*
+                  - ecr:*
                   - acm:DescribeCertificate
                   - acm:ListCertificates
                   - eks:*

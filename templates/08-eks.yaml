@@ -32,6 +32,22 @@ Conditions:
   AvecRoleDeploiement: !And [!Condition CreerEks, !Not [!Equals [!Ref RoleDeploiementArn, ""]]]
 
 Resources:
+  # Dépôt d'images privé : la pipeline y copie l'image signée de GHCR (même digest)
+  DepotImages:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "portail-${Environnement}-adsn"
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration: {ScanOnPush: true}
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}
+      EmptyOnDelete: true
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
   RoleCluster:
     Type: AWS::IAM::Role
     Condition: CreerEks
@@ -274,6 +290,9 @@ Resources:
       RoleArn: !GetAtt RoleControleurAlb.Arn
 
 Outputs:
+  DepotImages:
+    Value: !GetAtt DepotImages.RepositoryUri
+    Export: {Name: !Sub "portail-${Environnement}-DepotImages"}
   NomCluster:
     Condition: CreerEks
     Value: !Ref Cluster

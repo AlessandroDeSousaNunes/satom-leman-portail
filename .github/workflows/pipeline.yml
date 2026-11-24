@@ -193,6 +193,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: read
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.1.0
@@ -228,6 +229,12 @@ jobs:
           if ! aws eks describe-cluster --name "$CLUSTER" > /dev/null 2>&1; then
             echo "pas de cluster $CLUSTER (AvecEks=false) : étape ignorée"; exit 0
           fi
+          # copie de l'image signée GHCR -> ECR privé (manifeste copié tel quel : même digest, même signature)
+          ECR=$(aws cloudformation list-exports --query "Exports[?Name=='portail-dev-DepotImages'].Value" --output text)
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin > /dev/null
+          aws ecr get-login-password | docker login "${ECR%%/*}" -u AWS --password-stdin > /dev/null
+          docker buildx imagetools create -t "${ECR}:${GITHUB_SHA}" "${IMAGE}@${DIGEST}"
+          docker buildx imagetools inspect "${ECR}:${GITHUB_SHA}" --format '{{json .Manifest.Digest}}'
           aws eks update-kubeconfig --name "$CLUSTER" > /dev/null
           VPC=$(aws cloudformation list-exports --query "Exports[?Name=='portail-dev-VpcId'].Value" --output text)
           helm repo add eks https://aws.github.io/eks-charts > /dev/null && helm repo update eks > /dev/null
@@ -236,7 +243,7 @@ jobs:
             --set serviceAccount.create=true --set serviceAccount.name=aws-load-balancer-controller --wait --timeout 6m
           CERT=$(bash scripts/certificat.sh dev)
           cd k8s/overlays/dev
-          kustomize edit set image "${IMAGE}=${IMAGE}@${DIGEST}"
+          kustomize edit set image "${IMAGE}=${ECR}@${DIGEST}"
           kustomize build . | sed "s#CERTIFICAT_ARN#${CERT}#" > /tmp/rendu.yaml
           pip install -q checkov && checkov -f /tmp/rendu.yaml --framework kubernetes --compact --quiet
           kubectl apply -f /tmp/rendu.yaml
