@@ -132,6 +132,28 @@ Resources:
                   - ecr:DescribeImages
                   - ecr:DescribeImageScanFindings
                 Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/portail-*"
+              - Sid: FichiersStatiques
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:ListBucket, s3:DeleteObject]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::portail-*"
+                  - !Sub "arn:${AWS::Partition}:s3:::portail-*/*"
+              - Sid: ChiffrementFichiersStatiques
+                Effect: Allow
+                Action: [kms:GenerateDataKey, kms:Decrypt]
+                Resource: "*"
+                Condition:
+                  StringEquals: {kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"}
+              - Sid: CloudFrontInvalidationEtLecture
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetDistribution
+                  - cloudfront:GetInvalidation
+                  - wafv2:GetWebACL
+                  - wafv2:GetSampledRequests
+                  - cloudwatch:GetMetricStatistics
+                Resource: "*"
               - Sid: CertificatIngress
                 Effect: Allow
                 Action:
@@ -220,6 +242,12 @@ Resources:
                 Effect: Allow
                 Action: secretsmanager:GetRandomPassword
                 Resource: "*"
+              - Sid: BucketsDuPortail
+                Effect: Allow
+                Action: "s3:*"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::portail-*"
+                  - !Sub "arn:${AWS::Partition}:s3:::portail-*/*"
               - Sid: RolesDuPortailSeulement
                 Effect: Allow
                 Action:

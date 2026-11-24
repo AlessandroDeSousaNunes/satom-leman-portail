@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprint 11 : AWS WAF de la distribution CloudFront (portee CLOUDFRONT, donc us-east-1) :
+  regles gerees AWS (jeu commun, entrees malveillantes connues, reputation IP) et limitation de debit par IP.
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  LimiteRequetes:
+    Type: Number
+    Default: 500
+    Description: Requetes maximum par IP sur 5 minutes
+
+Resources:
+  # Clé de chiffrement des journaux WAF (us-east-1 : la clé du projet est en eu-north-1)
+  CleJournaux:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "Journaux WAF du portail ${Environnement}"
+      EnableKeyRotation: true
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AdministrationCompte
+            Effect: Allow
+            Principal: {AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"}
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: CloudWatchLogs
+            Effect: Allow
+            Principal: {Service: !Sub "logs.${AWS::Region}.amazonaws.com"}
+            Action: [kms:Encrypt*, kms:Decrypt*, kms:ReEncrypt*, kms:GenerateDataKey*, kms:Describe*]
+            Resource: "*"
+            Condition:
+              ArnLike:
+                kms:EncryptionContext:aws:logs:arn: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:aws-waf-logs-portail-*"
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  JournauxWaf:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "aws-waf-logs-portail-${Environnement}-${Equipe}"
+      RetentionInDays: 30
+      KmsKeyId: !GetAtt CleJournaux.Arn
+
+  AclWeb:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub "waf-portail-${Environnement}-${Equipe}"
+      Scope: CLOUDFRONT
+      DefaultAction: {Allow: {}}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "waf-portail-${Environnement}"
+      Rules:
+        - Name: limitation-debit-ip
+          Priority: 0
+          Action: {Block: {}}
+          Statement:
+            RateBasedStatement: {Limit: !Ref LimiteRequetes, AggregateKeyType: IP}
+          VisibilityConfig: {SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: limitation-debit-ip}
+        - Name: aws-reputation-ip
+          Priority: 1
+          OverrideAction: {None: {}}
+          Statement:
+            ManagedRuleGroupStatement: {VendorName: AWS, Name: AWSManagedRulesAmazonIpReputationList}
+          VisibilityConfig: {SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: aws-reputation-ip}
+        - Name: aws-jeu-commun
+          Priority: 2
+          OverrideAction: {None: {}}
+          Statement:
+            ManagedRuleGroupStatement: {VendorName: AWS, Name: AWSManagedRulesCommonRuleSet}
+          VisibilityConfig: {SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: aws-jeu-commun}
+        - Name: aws-entrees-malveillantes
+          Priority: 3
+          OverrideAction: {None: {}}
+          Statement:
+            ManagedRuleGroupStatement: {VendorName: AWS, Name: AWSManagedRulesKnownBadInputsRuleSet}
+          VisibilityConfig: {SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: aws-entrees-malveillantes}
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  JournalisationWaf:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Properties:
+      ResourceArn: !GetAtt AclWeb.Arn
+      LogDestinationConfigs: [!GetAtt JournauxWaf.Arn]
+
+Outputs:
+  AclWebArn:
+    Value: !GetAtt AclWeb.Arn

@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprint 11 : distribution CloudFront d-leman-portail. /static/* depuis un bucket S3
+  prive (OAC, chiffre KMS), /api/* et le reste depuis l'ALB (sans cache). WAF associe. L'ALB n'accepte que
+  la liste de prefixes CloudFront (voir 02-securite, parametre PrefixeCloudFront).
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  AvecCloudFront:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  AlbDns:
+    Type: String
+    Default: ""
+  AclWebArn:
+    Type: String
+    Default: ""
+    Description: WebACL WAF (pile us-east-1/11-waf), fournie par la pipeline
+
+Conditions:
+  CreerCdn: !And [!Equals [!Ref AvecCloudFront, "true"], !Not [!Equals [!Ref AlbDns, ""]]]
+  AvecWaf: !And [!Condition CreerCdn, !Not [!Equals [!Ref AclWebArn, ""]]]
+
+Resources:
+  BucketStatique:
+    Type: AWS::S3::Bucket
+    Condition: CreerCdn
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: "ADR 0005 : fichiers statiques publics servis par CloudFront, pas de journal d'acces S3"
+    Properties:
+      BucketName: !Sub "portail-${Environnement}-statique-adsn-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls: {Rules: [{ObjectOwnership: BucketOwnerEnforced}]}
+      VersioningConfiguration: {Status: Enabled}
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  ControleOrigine:
+    Type: AWS::CloudFront::OriginAccessControl
+    Condition: CreerCdn
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "oac-portail-${Environnement}-${Equipe}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: CreerCdn
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_174
+            comment: "ADR 0005 : domaine fictif, certificat CloudFront par defaut (pas de certificat ACM possible)"
+          - id: CKV_AWS_86
+            comment: "ADR 0005 : journaux d'acces non actives pendant le TP (cout), metriques CloudWatch actives"
+          - id: CKV2_AWS_72
+            comment: "ADR 0005 : origine ALB en HTTP, joignable uniquement depuis la liste de prefixes CloudFront"
+    Properties:
+      DistributionConfig:
+        Comment: !Sub "d-leman-portail ${Environnement} (ADSN)"
+        Enabled: true
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        WebACLId: !If [AvecWaf, !Ref AclWebArn, !Ref "AWS::NoValue"]
+        Origins:
+          - Id: alb
+            DomainName: !Ref AlbDns
+            CustomOriginConfig:
+              # certificat auto-signé sur l'ALB (domaine fictif) : CloudFront ne peut pas le valider,
+              # l'origine est donc jointe en HTTP, uniquement depuis les adresses CloudFront (ADR 0005)
+              OriginProtocolPolicy: http-only
+              HTTPPort: 80
+          - Id: statique
+            DomainName: !GetAtt BucketStatique.RegionalDomainName
+            OriginAccessControlId: !GetAtt ControleOrigine.Id
+            S3OriginConfig: {OriginAccessIdentity: ""}
+        DefaultCacheBehavior:
+          TargetOriginId: alb
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad        # Managed-CachingDisabled
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3 # Managed-AllViewer
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03 # Managed-SecurityHeadersPolicy
+          Compress: true
+        CacheBehaviors:
+          - PathPattern: /static/*
+            TargetOriginId: statique
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6      # Managed-CachingOptimized
+            ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+            Compress: true
+          - PathPattern: /api/*
+            TargetOriginId: alb
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+            ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+      Tags:
+        - {Key: Name, Value: !Sub "d-leman-portail-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  PolitiqueBucket:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreerCdn
+    Properties:
+      Bucket: !Ref BucketStatique
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LectureParCloudFrontSeulement
+            Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: s3:GetObject
+            Resource: !Sub "${BucketStatique.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+          - Sid: HttpsObligatoire
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt BucketStatique.Arn, !Sub "${BucketStatique.Arn}/*"]
+            Condition:
+              Bool: {aws:SecureTransport: false}
+
+Outputs:
+  DistributionId:
+    Condition: CreerCdn
+    Value: !Ref Distribution
+  DomaineCloudFront:
+    Condition: CreerCdn
+    Value: !GetAtt Distribution.DomainName
+  BucketStatique:
+    Condition: CreerCdn
+    Value: !Ref BucketStatique

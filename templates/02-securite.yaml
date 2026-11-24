@@ -15,10 +15,18 @@ Parameters:
     Default: 213.55.246.163/32
     Description: Seule adresse autorisee en SSH (jamais 0.0.0.0/0)
     AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/(2[4-9]|3[0-2])$'
+  PrefixeCloudFront:
+    Type: String
+    Default: ""
+    Description: Liste de prefixes geree com.amazonaws.global.cloudfront.origin-facing (sprint 11), fournie par la pipeline
   RetentionJours:
     Type: Number
     Default: 365
     AllowedValues: [30, 90, 180, 365]
+
+Conditions:
+  ViaCloudFront: !Not [!Equals [!Ref PrefixeCloudFront, ""]]
+  AccesPublic: !Equals [!Ref PrefixeCloudFront, ""]
 
 Resources:
   # ---------- Cle KMS du projet (journaux, volumes) ----------
@@ -83,8 +91,6 @@ Resources:
       GroupName: !Sub "alb-sg-portail-${Environnement}-${Equipe}"
       GroupDescription: ALB - HTTPS 443 depuis Internet uniquement
       VpcId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcId"}
-      SecurityGroupIngress:
-        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: https-public}
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 8080
@@ -96,6 +102,40 @@ Resources:
         - {Key: Projet, Value: SatomCloudNetwork}
         - {Key: Equipe, Value: !Ref Equipe}
         - {Key: Environnement, Value: !Ref Environnement}
+
+  # Entrées de l'ALB : HTTPS public (sprints 9 et 10) ou CloudFront seulement (sprint 11)
+  AlbHttpsPublic:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: AccesPublic
+    Properties:
+      GroupId: !Ref SgAlb
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: https-public
+
+  AlbHttpCloudFront:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: ViaCloudFront
+    Properties:
+      GroupId: !Ref SgAlb
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourcePrefixListId: !Ref PrefixeCloudFront
+      Description: http-depuis-cloudfront
+
+  AlbHttpsCloudFront:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: ViaCloudFront
+    Properties:
+      GroupId: !Ref SgAlb
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourcePrefixListId: !Ref PrefixeCloudFront
+      Description: https-depuis-cloudfront
 
   SgWeb:
     Type: AWS::EC2::SecurityGroup
