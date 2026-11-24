@@ -12,5 +12,6 @@
   "AvecTgw": "false",
   "AvecVpn": "false",
   "AvecDirectConnect": "false",
-  "AvecEks": "true"
+  "AvecEks": "true",
+  "AvecDns": "true"
 }

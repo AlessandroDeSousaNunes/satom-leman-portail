@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Portail Leman Finance - sprint 10 : zone publique leman-finance.example (DNSSEC), zone privee
+  prod.leman.internal associee au VPC principal, surveillance d'etat de l'ALB et enregistrement de
+  bascule (failover) du portail. Aucun enregistrement de la zone publique ne pointe vers une adresse privee.
+
+Parameters:
+  Environnement:
+    Type: String
+    AllowedValues: [dev, prod]
+  Equipe:
+    Type: String
+    Default: ADSN
+  CidrVpc:
+    Type: String
+    AllowedPattern: '^10\.(\d{1,3})\.0\.0/16$'
+  AvecDns:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  AlbDns:
+    Type: String
+    Default: ""
+    Description: Nom DNS de l'ALB cree par le controleur Kubernetes (fourni par la pipeline)
+  CleDnssecArn:
+    Type: String
+    Default: ""
+    Description: Cle KMS asymetrique ECC_NIST_P256 en us-east-1 (pile 10-dnssec-cle, fournie par la pipeline)
+  IpSecours:
+    Type: String
+    Default: 192.0.2.10
+    Description: Page de maintenance (adresse de documentation) servie en cas de panne de l'ALB
+
+Conditions:
+  CreerDns: !Equals [!Ref AvecDns, "true"]
+  AvecAlb: !And [!Condition CreerDns, !Not [!Equals [!Ref AlbDns, ""]]]
+  AvecDnssec: !And [!Condition CreerDns, !Not [!Equals [!Ref CleDnssecArn, ""]]]
+
+Resources:
+  ZonePublique:
+    Type: AWS::Route53::HostedZone
+    Condition: CreerDns
+    Properties:
+      Name: !Sub "${Environnement}.leman-finance.example"
+      HostedZoneConfig: {Comment: !Sub "Portail Leman Finance ${Environnement} (fictif, ADSN)"}
+      HostedZoneTags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  ZonePrivee:
+    Type: AWS::Route53::HostedZone
+    Condition: CreerDns
+    Properties:
+      Name: !Sub "${Environnement}.leman.internal"
+      HostedZoneConfig: {Comment: !Sub "Noms internes du portail ${Environnement} (ADSN)"}
+      VPCs:
+        - VPCId: {"Fn::ImportValue": !Sub "portail-${Environnement}-VpcId"}
+          VPCRegion: !Ref "AWS::Region"
+      HostedZoneTags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
+  # ---------- Zone privee : noms internes (jamais publies dans la zone publique) ----------
+  NomApp:
+    Type: AWS::Route53::RecordSet
+    Condition: CreerDns
+    Properties:
+      HostedZoneId: !Ref ZonePrivee
+      Name: !Sub "app.${Environnement}.leman.internal"
+      Type: A
+      TTL: "60"
+      ResourceRecords: [!Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpc]], ".2.10"]]]
+
+  NomWeb:
+    Type: AWS::Route53::RecordSet
+    Condition: CreerDns
+    Properties:
+      HostedZoneId: !Ref ZonePrivee
+      Name: !Sub "web.${Environnement}.leman.internal"
+      Type: A
+      TTL: "60"
+      ResourceRecords: [!Join ["", [!Select [0, !Split [".0.0/16", !Ref CidrVpc]], ".1.10"]]]
+
+  # ---------- Surveillance de l'ALB et bascule ----------
+  SurveillanceAlb:
+    Type: AWS::Route53::HealthCheck
+    Condition: AvecAlb
+    Properties:
+      HealthCheckConfig:
+        Type: HTTPS
+        FullyQualifiedDomainName: !Ref AlbDns
+        ResourcePath: /health
+        Port: 443
+        RequestInterval: 10
+        FailureThreshold: 3
+        MeasureLatency: true
+      HealthCheckTags:
+        - {Key: Name, Value: !Sub "hc-portail-${Environnement}-${Equipe}"}
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+
+  PortailPrincipal:
+    Type: AWS::Route53::RecordSet
+    Condition: AvecAlb
+    Properties:
+      HostedZoneId: !Ref ZonePublique
+      Name: !Sub "portefeuilles.${Environnement}.leman-finance.example"
+      Type: CNAME
+      TTL: "30"
+      SetIdentifier: principal-alb
+      Failover: PRIMARY
+      HealthCheckId: !Ref SurveillanceAlb
+      ResourceRecords: [!Ref AlbDns]
+
+  PortailSecours:
+    Type: AWS::Route53::RecordSet
+    Condition: AvecAlb
+    Properties:
+      HostedZoneId: !Ref ZonePublique
+      Name: !Sub "portefeuilles.${Environnement}.leman-finance.example"
+      Type: CNAME
+      TTL: "30"
+      SetIdentifier: secours-maintenance
+      Failover: SECONDARY
+      ResourceRecords: [!Sub "maintenance.${Environnement}.leman-finance.example"]
+
+  Maintenance:
+    Type: AWS::Route53::RecordSet
+    Condition: CreerDns
+    Properties:
+      HostedZoneId: !Ref ZonePublique
+      Name: !Sub "maintenance.${Environnement}.leman-finance.example"
+      Type: A
+      TTL: "60"
+      ResourceRecords: [!Ref IpSecours]
+
+  # ---------- DNSSEC de la zone publique ----------
+  CleSignature:
+    Type: AWS::Route53::KeySigningKey
+    Condition: AvecDnssec
+    Properties:
+      HostedZoneId: !Ref ZonePublique
+      KeyManagementServiceArn: !Ref CleDnssecArn
+      Name: !Sub "ksk${Environnement}adsn"
+      Status: ACTIVE
+
+  Dnssec:
+    Type: AWS::Route53::DNSSEC
+    Condition: AvecDnssec
+    DependsOn: CleSignature
+    Properties:
+      HostedZoneId: !Ref ZonePublique
+
+Outputs:
+  ZonePubliqueId:
+    Condition: CreerDns
+    Value: !Ref ZonePublique
+  ServeursDeNoms:
+    Condition: CreerDns
+    Value: !Join [",", !GetAtt ZonePublique.NameServers]
+  ZonePriveeId:
+    Condition: CreerDns
+    Value: !Ref ZonePrivee
+  SurveillanceAlbId:
+    Condition: AvecAlb
+    Value: !Ref SurveillanceAlb

@@ -212,6 +212,16 @@ jobs:
         run: |
           echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
           pip install boto3
+          # sprint 10 : clé DNSSEC en us-east-1 (exigence Route 53), puis valeurs transmises aux piles
+          if [ "$(jq -r .AvecDns parameters/dev.json)" = true ]; then
+            python scripts/deployer.py templates/us-east-1/10-dnssec-cle.yaml parameters/dev.json \
+              --region us-east-1 --role-cfn "${{ secrets.CFN_ROLE_ARN }}" $CONFIRMER
+            CLE=$(aws cloudformation describe-stacks --region us-east-1 --stack-name portail-dev-dnssec-cle \
+              --query "Stacks[0].Outputs[?OutputKey=='CleDnssecArn'].OutputValue" --output text)
+            echo "PARAM_CleDnssecArn=$CLE" >> "$GITHUB_ENV"; export PARAM_CleDnssecArn="$CLE"
+          fi
+          ALB=$(aws elbv2 describe-load-balancers --names alb-dev-leman-ADSN --query 'LoadBalancers[0].DNSName' --output text 2>/dev/null || true)
+          [ -n "$ALB" ] && export PARAM_AlbDns="$ALB"
           piles=$(ls templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml 2>/dev/null | sort)
           [ "$ORDRE" = inverse ] && piles=$(echo "$piles" | sort -r)
           echo "ordre de déploiement ($ORDRE) : $(echo $piles | tr '\n' ' ')"
@@ -256,6 +266,10 @@ jobs:
           echo "ALB : https://$HOTE" | tee -a "$GITHUB_STEP_SUMMARY"
           for i in $(seq 1 30); do curl -skf "https://$HOTE/api/health" && break; sleep 10; done
           echo; bash ../../../tests/connectivite/verifier.sh "https://$HOTE" | tee -a "$GITHUB_STEP_SUMMARY"
+          # sprint 10 : surveillance et bascule DNS vers l'ALB (aucun changement si déjà en place)
+          cd ../../..
+          PARAM_AlbDns="$HOTE" PARAM_RoleDeploiementArn="${{ secrets.AWS_ROLE_ARN }}" \
+            python scripts/deployer.py templates/10-dns.yaml parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}"
 
   # ---------------------------------------------------------------- 5
   tests-dynamiques:

@@ -69,7 +69,9 @@ def changements_dangereux(changements: list[dict]) -> list[str]:
     return alertes
 
 
-def deployer(template: Path, fichier_parametres: Path, role_cfn: str | None, confirmer: bool) -> int:
+def deployer(
+    template: Path, fichier_parametres: Path, role_cfn: str | None, confirmer: bool, region: str | None = None
+) -> int:
     valeurs = json.loads(fichier_parametres.read_text(encoding="utf-8"))
     # Paramètres sensibles (ARN contenant le numéro de compte) : variables PARAM_<Cle> de la pipeline,
     # jamais écrits dans le dépôt
@@ -77,7 +79,7 @@ def deployer(template: Path, fichier_parametres: Path, role_cfn: str | None, con
     environnement = valeurs["Environnement"]
     pile = nom_pile(template, environnement)
     corps = template.read_text(encoding="utf-8")
-    cfn = boto3.client("cloudformation")
+    cfn = boto3.client("cloudformation", region_name=region)
 
     type_cs = "UPDATE" if pile_existe(cfn, pile) else "CREATE"
     nom_cs = f"cs-{int(time.time())}"
@@ -153,8 +155,9 @@ def main() -> int:
     parseur.add_argument("parametres", type=Path)
     parseur.add_argument("--role-cfn", default=None, help="role d'execution CloudFormation")
     parseur.add_argument("--confirmer-remplacement", action="store_true")
+    parseur.add_argument("--region", default=None, help="région de la pile")
     args = parseur.parse_args()
-    return deployer(args.template, args.parametres, args.role_cfn, args.confirmer_remplacement)
+    return deployer(args.template, args.parametres, args.role_cfn, args.confirmer_remplacement, args.region)
 
 
 if __name__ == "__main__":
