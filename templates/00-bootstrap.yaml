@@ -109,6 +109,17 @@ Resources:
                   - logs:GetQueryResults
                   - logs:FilterLogEvents
                 Resource: "*"
+              - Sid: CertificatIngress
+                Effect: Allow
+                Action:
+                  - acm:ImportCertificate
+                  - acm:AddTagsToCertificate
+                  - acm:ListCertificates
+                  - acm:DescribeCertificate
+                  - acm:ListTagsForCertificate
+                Resource: "*"
+                Condition:
+                  StringEquals: {aws:RequestedRegion: !Ref "AWS::Region"}
               - Sid: AssociationAttachementsVpn
                 Effect: Allow
                 Action:

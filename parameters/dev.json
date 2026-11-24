@@ -3,13 +3,14 @@
   "Equipe": "ADSN",
   "CidrVpc": "10.10.0.0/16",
   "CidrVpcDev": "10.11.0.0/16",
-  "AvecNat": "false",
+  "AvecNat": "true",
   "SalleExploitation": "213.55.246.163/32",
   "RetentionJours": "30",
   "AvecPareFeu": "false",
   "ConnexionDev": "tgw",
-  "InstancesTest": "true",
+  "InstancesTest": "false",
   "AvecTgw": "false",
   "AvecVpn": "false",
-  "AvecDirectConnect": "false"
+  "AvecDirectConnect": "false",
+  "AvecEks": "true"
 }
