@@ -20,6 +20,10 @@ on:
         description: Confirmer les remplacements annoncés par les jeux de modifications (après relecture)
         type: boolean
         default: false
+      ordre_inverse:
+        description: Déployer les piles en ordre inverse (démontage en fin de session)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -200,10 +204,14 @@ jobs:
       - name: Piles CloudFormation par jeu de modifications
         env:
           CONFIRMER: ${{ inputs.confirmer_remplacement && '--confirmer-remplacement' || '' }}
+          # démontage en fin de session : ordre inverse (les piles qui importent une sortie partent avant)
+          ORDRE: ${{ inputs.ordre_inverse && 'inverse' || 'normal' }}
         run: |
           pip install boto3
-          for t in templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml; do
-            [ -f "$t" ] || continue
+          piles=$(ls templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml 2>/dev/null | sort)
+          [ "$ORDRE" = inverse ] && piles=$(echo "$piles" | sort -r)
+          echo "ordre de déploiement ($ORDRE) : $(echo $piles | tr '\n' ' ')"
+          for t in $piles; do
             python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}" $CONFIRMER
           done
       - name: Associations TGW des VPN et de Direct Connect (sprints 7 et 8)
