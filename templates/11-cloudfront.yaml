@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Portail Leman Finance - sprint 11 : distribution CloudFront d-leman-portail. /static/* depuis un bucket S3
-  prive (OAC, chiffre KMS), /api/* et le reste depuis l'ALB (sans cache). WAF associe. L'ALB n'accepte que
+  prive (OAC, chiffre KMS), /api/* et le reste depuis l'ALB (sans cache). WAF regional sur l'ALB (11-waf). L'ALB n'accepte que
   la liste de prefixes CloudFront (voir 02-securite, parametre PrefixeCloudFront).
 
 Parameters:
@@ -18,14 +18,9 @@ Parameters:
   AlbDns:
     Type: String
     Default: ""
-  AclWebArn:
-    Type: String
-    Default: ""
-    Description: WebACL WAF (pile us-east-1/11-waf), fournie par la pipeline
 
 Conditions:
   CreerCdn: !And [!Equals [!Ref AvecCloudFront, "true"], !Not [!Equals [!Ref AlbDns, ""]]]
-  AvecWaf: !And [!Condition CreerCdn, !Not [!Equals [!Ref AclWebArn, ""]]]
 
 Resources:
   BucketStatique:
@@ -76,6 +71,8 @@ Resources:
             comment: "ADR 0005 : domaine fictif, certificat CloudFront par defaut (pas de certificat ACM possible)"
           - id: CKV_AWS_86
             comment: "ADR 0005 : journaux d'acces non actives pendant le TP (cout), metriques CloudWatch actives"
+          - id: CKV_AWS_68
+            comment: "ADR 0007 : WAF CLOUDFRONT exige us-east-1, interdit par la SCP ; WAF regional sur l'ALB d'origine"
           - id: CKV2_AWS_72
             comment: "ADR 0005 : origine ALB en HTTP, joignable uniquement depuis la liste de prefixes CloudFront"
     Properties:
@@ -85,7 +82,6 @@ Resources:
         HttpVersion: http2and3
         IPV6Enabled: true
         PriceClass: PriceClass_100
-        WebACLId: !If [AvecWaf, !Ref AclWebArn, !Ref "AWS::NoValue"]
         Origins:
           - Id: alb
             DomainName: !Ref AlbDns

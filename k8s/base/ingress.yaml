@@ -15,6 +15,8 @@ metadata:
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
     alb.ingress.kubernetes.io/healthcheck-path: /health
     alb.ingress.kubernetes.io/group.name: portail-leman
+    # WAF régional (templates/11-waf.yaml), remplacé par la pipeline
+    alb.ingress.kubernetes.io/wafv2-acl-arn: WAF_ACL_ARN
     # remplacé par la pipeline (scripts/certificat.sh)
     alb.ingress.kubernetes.io/certificate-arn: CERTIFICAT_ARN
 spec:

@@ -1,7 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Portail Leman Finance - sprint 11 : AWS WAF de la distribution CloudFront (portee CLOUDFRONT, donc us-east-1) :
-  regles gerees AWS (jeu commun, entrees malveillantes connues, reputation IP) et limitation de debit par IP.
+  Portail Leman Finance - sprint 11 : AWS WAF regional associe a l'ALB (origine de CloudFront). Regles gerees
+  AWS (reputation IP, jeu commun, entrees malveillantes) et limitation de debit par IP du visiteur
+  (en-tete X-Forwarded-For pose par CloudFront). Le WAF de portee CLOUDFRONT exige us-east-1, region
+  interdite au role de la pipeline par la SCP de l'organisation (ADR 0007).
 
 Parameters:
   Environnement:
@@ -10,63 +12,47 @@ Parameters:
   Equipe:
     Type: String
     Default: ADSN
+  AvecCloudFront:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
   LimiteRequetes:
     Type: Number
     Default: 500
-    Description: Requetes maximum par IP sur 5 minutes
+    Description: Requetes maximum par IP de visiteur sur 5 minutes
+
+Conditions:
+  CreerWaf: !Equals [!Ref AvecCloudFront, "true"]
 
 Resources:
-  # Clé de chiffrement des journaux WAF (us-east-1 : la clé du projet est en eu-north-1)
-  CleJournaux:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: !Sub "Journaux WAF du portail ${Environnement}"
-      EnableKeyRotation: true
-      PendingWindowInDays: 7
-      KeyPolicy:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: AdministrationCompte
-            Effect: Allow
-            Principal: {AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"}
-            Action: "kms:*"
-            Resource: "*"
-          - Sid: CloudWatchLogs
-            Effect: Allow
-            Principal: {Service: !Sub "logs.${AWS::Region}.amazonaws.com"}
-            Action: [kms:Encrypt*, kms:Decrypt*, kms:ReEncrypt*, kms:GenerateDataKey*, kms:Describe*]
-            Resource: "*"
-            Condition:
-              ArnLike:
-                kms:EncryptionContext:aws:logs:arn: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:aws-waf-logs-portail-*"
-      Tags:
-        - {Key: Projet, Value: SatomCloudNetwork}
-        - {Key: Equipe, Value: !Ref Equipe}
-        - {Key: Environnement, Value: !Ref Environnement}
-
   JournauxWaf:
     Type: AWS::Logs::LogGroup
+    Condition: CreerWaf
     Properties:
       LogGroupName: !Sub "aws-waf-logs-portail-${Environnement}-${Equipe}"
       RetentionInDays: 30
-      KmsKeyId: !GetAtt CleJournaux.Arn
+      KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}
 
   AclWeb:
     Type: AWS::WAFv2::WebACL
+    Condition: CreerWaf
     Properties:
       Name: !Sub "waf-portail-${Environnement}-${Equipe}"
-      Scope: CLOUDFRONT
+      Scope: REGIONAL
       DefaultAction: {Allow: {}}
       VisibilityConfig:
         SampledRequestsEnabled: true
         CloudWatchMetricsEnabled: true
         MetricName: !Sub "waf-portail-${Environnement}"
       Rules:
-        - Name: limitation-debit-ip
+        - Name: limitation-debit-ip-visiteur
           Priority: 0
           Action: {Block: {}}
           Statement:
-            RateBasedStatement: {Limit: !Ref LimiteRequetes, AggregateKeyType: IP}
+            RateBasedStatement:
+              Limit: !Ref LimiteRequetes
+              AggregateKeyType: FORWARDED_IP
+              ForwardedIPConfig: {HeaderName: X-Forwarded-For, FallbackBehavior: MATCH}
           VisibilityConfig: {SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: limitation-debit-ip}
         - Name: aws-reputation-ip
           Priority: 1
@@ -93,10 +79,13 @@ Resources:
 
   JournalisationWaf:
     Type: AWS::WAFv2::LoggingConfiguration
+    Condition: CreerWaf
     Properties:
       ResourceArn: !GetAtt AclWeb.Arn
       LogDestinationConfigs: [!GetAtt JournauxWaf.Arn]
 
 Outputs:
   AclWebArn:
+    Condition: CreerWaf
     Value: !GetAtt AclWeb.Arn
+    Export: {Name: !Sub "portail-${Environnement}-AclWeb"}
