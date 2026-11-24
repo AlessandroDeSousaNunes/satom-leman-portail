@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import boto3
@@ -129,6 +130,7 @@ def deployer(
             print(f"     - {a}")
         return 2
 
+    depart = datetime.now(UTC)
     cfn.execute_change_set(StackName=pile, ChangeSetName=nom_cs)
     attente = "stack_create_complete" if type_cs == "CREATE" else "stack_update_complete"
     debut = time.time()
@@ -137,7 +139,8 @@ def deployer(
     except WaiterError:
         evenements = cfn.describe_stack_events(StackName=pile)["StackEvents"]
         for e in evenements:
-            if e["ResourceStatus"].endswith("FAILED"):
+            # seulement les échecs de cette exécution (pas ceux des tentatives précédentes)
+            if e["Timestamp"] >= depart and e["ResourceStatus"].endswith("FAILED"):
                 print(f"   ECHEC {e['LogicalResourceId']} : {e.get('ResourceStatusReason', '')}")
         return 1
     sorties = cfn.describe_stacks(StackName=pile)["Stacks"][0].get("Outputs", [])
