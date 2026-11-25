@@ -104,7 +104,9 @@ Resources:
         - {Key: Equipe, Value: !Ref Equipe}
         - {Key: Environnement, Value: !Ref Environnement}
 
-  # Entrées de l'ALB : HTTPS public (sprints 9 et 10) ou CloudFront seulement (sprint 11)
+  # Entrées de l'ALB : HTTPS public (sprints 9 et 10) ou CloudFront seulement (sprint 11).
+  # Une seule règle vers la liste de préfixes CloudFront : chaque entrée de la liste (~55) compte
+  # comme une règle du groupe (limite 60) ; CloudFront joint l'origine en HTTP 80 (ADR 0005).
   AlbHttpsPublic:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: AccesPublic
@@ -126,17 +128,6 @@ Resources:
       ToPort: 80
       SourcePrefixListId: !Ref PrefixeCloudFront
       Description: http-depuis-cloudfront
-
-  AlbHttpsCloudFront:
-    Type: AWS::EC2::SecurityGroupIngress
-    Condition: ViaCloudFront
-    Properties:
-      GroupId: !Ref SgAlb
-      IpProtocol: tcp
-      FromPort: 443
-      ToPort: 443
-      SourcePrefixListId: !Ref PrefixeCloudFront
-      Description: https-depuis-cloudfront
 
   SgWeb:
     Type: AWS::EC2::SecurityGroup

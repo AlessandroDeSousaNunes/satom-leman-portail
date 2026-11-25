@@ -46,8 +46,8 @@ if [ "$MODE" = bascule ]; then
   debut=$(date +%s)
   for i in $(seq 1 60); do
     cible=$(reponse)
-    if [[ "$cible" == *elb.amazonaws.com* ]]; then
-      echo "retour sur l'ALB après $(( $(date +%s) - debut )) s : $cible"; break
+    if [[ -n "$cible" && "$cible" != maintenance* ]]; then
+      echo "retour sur le portail (CloudFront ou ALB) après $(( $(date +%s) - debut )) s : $cible"; break
     fi
     sleep 5
   done

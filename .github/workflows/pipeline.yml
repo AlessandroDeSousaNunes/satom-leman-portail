@@ -224,6 +224,9 @@ jobs:
             PL=$(aws ec2 describe-managed-prefix-lists --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing               --query 'PrefixLists[0].PrefixListId' --output text)
             echo "PARAM_PrefixeCloudFront=$PL" >> "$GITHUB_ENV"; export PARAM_PrefixeCloudFront="$PL"
           fi
+          # sprint 11 : la bascule DNS vise CloudFront dès que la distribution existe (ALB réservé à CloudFront)
+          CDN=$(aws cloudformation describe-stacks --stack-name portail-dev-cloudfront             --query "Stacks[0].Outputs[?OutputKey=='DomaineCloudFront'].OutputValue" --output text 2>/dev/null || true)
+          [ -n "$CDN" ] && [ "$CDN" != None ] && export PARAM_DomaineCdn="$CDN"
           piles=$(ls templates/0[1-9]-*.yaml templates/1[0-9]-*.yaml 2>/dev/null | sort)
           [ "$ORDRE" = inverse ] && piles=$(echo "$piles" | sort -r)
           echo "ordre de déploiement ($ORDRE) : $(echo $piles | tr '\n' ' ')"
@@ -268,15 +271,23 @@ jobs:
             HOTE=$(kubectl -n portail get ingress portail -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
             [ -n "$HOTE" ] && break; sleep 15
           done
-          echo "ALB : https://$HOTE" | tee -a "$GITHUB_STEP_SUMMARY"
-          for i in $(seq 1 30); do curl -skf "https://$HOTE/api/health" && break; sleep 10; done
-          echo; bash ../../../tests/connectivite/verifier.sh "https://$HOTE" | tee -a "$GITHUB_STEP_SUMMARY"
-          # sprint 10 : surveillance et bascule DNS vers l'ALB (aucun changement si déjà en place)
+          echo "ALB : $HOTE" | tee -a "$GITHUB_STEP_SUMMARY"
           cd ../../..
           ALBARN=$(aws elbv2 describe-load-balancers --names alb-dev-leman-ADSN --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+          export PARAM_AlbDns="$HOTE" PARAM_AlbNomComplet="${ALBARN#*loadbalancer/}" PARAM_RoleDeploiementArn="${{ secrets.AWS_ROLE_ARN }}"
+          URL="https://$HOTE"
+          if [ -n "${PARAM_PrefixeCloudFront:-}" ]; then
+            # sprint 11 : l'ALB n'accepte que CloudFront, la distribution est créée avant la vérification
+            python scripts/deployer.py templates/11-cloudfront.yaml parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}"
+            CDN=$(aws cloudformation describe-stacks --stack-name portail-dev-cloudfront               --query "Stacks[0].Outputs[?OutputKey=='DomaineCloudFront'].OutputValue" --output text)
+            export PARAM_DomaineCdn="$CDN"; URL="https://$CDN"
+            echo "CloudFront : $URL" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          for i in $(seq 1 60); do curl -skf "$URL/api/health" && break; sleep 10; done
+          echo; bash tests/connectivite/verifier.sh "$URL" | tee -a "$GITHUB_STEP_SUMMARY"
+          # sprint 10 : surveillance et bascule DNS (aucun changement si déjà en place)
           for t in templates/10-dns.yaml templates/11-cloudfront.yaml templates/12-supervision.yaml; do
-            PARAM_AlbDns="$HOTE" PARAM_AlbNomComplet="${ALBARN#*loadbalancer/}" PARAM_RoleDeploiementArn="${{ secrets.AWS_ROLE_ARN }}" \
-              python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}"
+            python scripts/deployer.py "$t" parameters/dev.json --role-cfn "${{ secrets.CFN_ROLE_ARN }}"
           done
           # sprint 11 : fichiers statiques dans le bucket privé (servis par CloudFront /static/*)
           BUCKET=$(aws cloudformation describe-stacks --stack-name portail-dev-cloudfront \
