@@ -354,7 +354,8 @@ jobs:
             --output=json --output=html --output-path=docs/rapports/lighthouse-dev
           jq -r '.categories[] | "\(.title) : \(.score*100|floor)"' docs/rapports/lighthouse-dev.report.json \
             | tee -a "$GITHUB_STEP_SUMMARY"
-          jq -e '[.categories.performance.score, .categories.accessibility.score, .categories["best-practices"].score] | all(. >= 0.9)' \
+          # seuils du cahier des charges (section 3.3) : performance >= 85, accessibilité >= 90
+          jq -e '.categories.performance.score >= 0.85 and .categories.accessibility.score >= 0.9' \
             docs/rapports/lighthouse-dev.report.json > /dev/null
       - uses: actions/upload-artifact@v7.0.2
         if: always()
