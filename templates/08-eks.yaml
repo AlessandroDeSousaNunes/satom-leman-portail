@@ -22,6 +22,12 @@ Parameters:
   TypeNoeud:
     Type: String
     Default: t3.small
+  NombreNoeuds:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 3
+    Description: Noeuds geres (1 en dev, quota vCPU du compte partage ; ADR 0008)
   RoleDeploiementArn:
     Type: String
     Default: ""
@@ -164,7 +170,7 @@ Resources:
       AmiType: AL2023_x86_64_STANDARD
       CapacityType: ON_DEMAND
       DiskSize: 20
-      ScalingConfig: {MinSize: 2, DesiredSize: 2, MaxSize: 3}
+      ScalingConfig: {MinSize: !Ref NombreNoeuds, DesiredSize: !Ref NombreNoeuds, MaxSize: !Ref NombreNoeuds}
       UpdateConfig: {MaxUnavailable: 1}
       Subnets:
         - {"Fn::ImportValue": !Sub "portail-${Environnement}-SubPrive1a"}
