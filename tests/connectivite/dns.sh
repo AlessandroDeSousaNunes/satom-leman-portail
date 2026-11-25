@@ -15,10 +15,10 @@ dig +norecurse "@$NS" "$NOM" CNAME | grep -E "^${NOM}|Query time"
 echo "== Temps de résolution sur 10 requêtes (objectif < 100 ms)"
 for i in $(seq 1 10); do dig +norecurse "@$NS" "$NOM" CNAME | awk '/Query time/{print $4}'; done \
   | awk '{s+=$1; if($1>m)m=$1} END {printf "moyenne %.1f ms, maximum %d ms\n", s/NR, m}'
-echo "== DNSSEC : clés publiées et signature de la réponse"
-dig +norecurse +dnssec "@$NS" "$ZONE" DNSKEY | grep -cE "DNSKEY\s+25[67]" | sed 's/^/clés DNSKEY publiées : /'
-dig +norecurse +dnssec "@$NS" "$NOM" CNAME | grep -E "RRSIG" | awk '{print "signature :", $4, $5, $6, "algorithme", $6}' | head -1
-aws route53 get-dnssec --hosted-zone-id "$(sortie ZonePubliqueId)" --query 'Status.ServeSignature' --output text | sed 's/^/statut DNSSEC de la zone : /'
+echo "== DNSSEC (ADR 0007 : clé KMS en us-east-1 interdite par la SCP, non activé)"
+cles=$(dig +norecurse +dnssec "@$NS" "$ZONE" DNSKEY | grep -cE "DNSKEY\s+25[67]" || true)
+echo "clés DNSKEY publiées : $cles"
+aws route53 get-dnssec --hosted-zone-id "$(sortie ZonePubliqueId)" --query 'Status.ServeSignature' --output text   | sed 's/^/statut DNSSEC de la zone : /'
 echo "== Surveillance d'état de l'ALB ($HC)"
 aws route53 get-health-check-status --health-check-id "$HC" \
   --query 'HealthCheckObservations[].StatusReport.Status' --output text | tr '\t' '\n' | sort | uniq -c | head -5

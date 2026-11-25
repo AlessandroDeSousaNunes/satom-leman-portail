@@ -51,6 +51,15 @@ Resources:
             Resource: "*"
             Condition:
               StringEquals: {aws:SourceAccount: !Ref "AWS::AccountId"}
+          # Sprint 11 : CloudFront (OAC) déchiffre les fichiers statiques du bucket privé chiffré par cette clé
+          - Sid: CloudFrontFichiersStatiques
+            Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals: {aws:SourceAccount: !Ref "AWS::AccountId"}
+              ArnLike: {aws:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"}
           - Sid: CloudWatchLogs
             Effect: Allow
             Principal: {Service: !Sub "logs.${AWS::Region}.amazonaws.com"}
