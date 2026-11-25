@@ -68,9 +68,18 @@ def creer_app(service: str | None = None) -> Flask:
     environnement = os.environ.get("ENVIRONNEMENT", "dev")
 
     @app.before_request
-    def _debut() -> None:
+    def _debut() -> Response | None:
         g.debut = time.perf_counter()
         g.requete_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex
+        # Injection de panne (sprint 12, test d'alarme de bout en bout) : PANNE_SIMULEE=1 fait répondre 503
+        # aux routes métier de l'API ; les sondes de santé restent vertes pour que l'ALB garde ses cibles.
+        if (
+            os.environ.get("PANNE_SIMULEE") == "1"
+            and request.path.startswith("/api/")
+            and request.path != "/api/health"
+        ):
+            return Response('{"erreur": "panne simulee"}', status=503, mimetype="application/json")
+        return None
 
     @app.after_request
     def _fin(reponse: Response) -> Response:

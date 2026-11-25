@@ -116,3 +116,21 @@ def test_journal_configure_une_seule_fois():
     second = configurer_journal("essai")
     assert premier is second
     assert len(second.handlers) == 1
+
+
+def test_panne_simulee_api_repond_503(monkeypatch, api):
+    monkeypatch.setenv("PANNE_SIMULEE", "1")
+    reponse = api.get("/api/portefeuilles")
+    assert reponse.status_code == 503
+    assert reponse.get_json()["erreur"] == "panne simulee"
+
+
+def test_panne_simulee_garde_les_sondes_saines(monkeypatch, api):
+    monkeypatch.setenv("PANNE_SIMULEE", "1")
+    assert api.get("/api/health").status_code == 200
+    assert api.get("/health").status_code == 200
+
+
+def test_sans_panne_simulee_api_normale(monkeypatch, api):
+    monkeypatch.delenv("PANNE_SIMULEE", raising=False)
+    assert api.get("/api/portefeuilles").status_code == 200
