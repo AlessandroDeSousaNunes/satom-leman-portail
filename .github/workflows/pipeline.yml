@@ -351,9 +351,14 @@ jobs:
           k6 run tests/charge/portail.js --summary-export=docs/rapports/k6-dev.json | tee docs/rapports/k6-dev.txt
       - name: Lighthouse (performance, accessibilité, bonnes pratiques)
         run: |
-          npx --yes lighthouse@12.8.2 "$URL_CIBLE/" --quiet --chrome-flags="--headless=new --no-sandbox" \
-            --extra-headers="{\"x-test-charge\":\"$JETON_CHARGE\"}" \
-            --output=json --output=html --output-path=docs/rapports/lighthouse-dev
+          # Chrome headless peut échouer à enregistrer la trace (NO_NAVSTART) : jusqu'à 3 tentatives
+          for essai in 1 2 3; do
+            npx --yes lighthouse@12.8.2 "$URL_CIBLE/" --quiet --max-wait-for-load=60000 \
+              --chrome-flags="--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage" \
+              --extra-headers="{\"x-test-charge\":\"$JETON_CHARGE\"}" \
+              --output=json --output=html --output-path=docs/rapports/lighthouse-dev && break
+            echo "tentative $essai échouée"; [ "$essai" = 3 ] && exit 1; sleep 10
+          done
           jq -r '.categories[] | "\(.title) : \(.score*100|floor)"' docs/rapports/lighthouse-dev.report.json \
             | tee -a "$GITHUB_STEP_SUMMARY"
           # seuils du cahier des charges (section 3.3) : performance >= 85, accessibilité >= 90
