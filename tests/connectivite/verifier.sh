@@ -7,7 +7,7 @@ echec=0
 verifier() {
   local chemin="$1" attendu="$2"
   local code temps
-  read -r code temps < <(curl -sk -o /dev/null -w '%{http_code} %{time_total}' "$URL$chemin")
+  read -r code temps < <(curl -sk -o /dev/null -w '%{http_code} %{time_total}\n' "$URL$chemin")
   if [[ "$code" == "$attendu" ]]; then
     printf 'OK    %-28s %s en %ss\n' "$chemin" "$code" "$temps"
   else

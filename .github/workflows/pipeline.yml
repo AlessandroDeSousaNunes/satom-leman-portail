@@ -288,6 +288,7 @@ jobs:
           fi
           for i in $(seq 1 60); do curl -skf "$URL/api/health" && break; sleep 10; done
           echo "url=$URL" >> "$GITHUB_OUTPUT"
+          set -o pipefail   # un échec de la vérification doit arrêter le déploiement
           echo; bash tests/connectivite/verifier.sh "$URL" | tee -a "$GITHUB_STEP_SUMMARY"
           # sprint 10 : surveillance et bascule DNS (aucun changement si déjà en place)
           for t in templates/10-dns.yaml templates/11-cloudfront.yaml templates/12-supervision.yaml; do
@@ -330,6 +331,7 @@ jobs:
           echo "::add-mask::$JETON"
           echo "JETON_CHARGE=$JETON" >> "$GITHUB_ENV"
       - name: Connectivité (via CloudFront)
+        shell: bash   # -eo pipefail : un échec de la vérification arrête l'étape
         run: bash tests/connectivite/verifier.sh "$URL_CIBLE" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: OWASP ZAP baseline (DAST)
         uses: zaproxy/action-baseline@v0.15.0
