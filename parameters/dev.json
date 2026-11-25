@@ -13,6 +13,8 @@
   "AvecVpn": "false",
   "AvecDirectConnect": "false",
   "AvecEks": "true",
+  "TypeNoeud": "t3.medium",
+  "NombreNoeuds": "1",
   "AvecDns": "true",
   "AvecCloudFront": "true"
 }
