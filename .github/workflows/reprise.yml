@@ -1,0 +1,43 @@
+# Sprint 13 : exercice de reprise après sinistre. Supprime tout l'environnement dev depuis le dépôt ;
+# la recréation est ensuite lancée par la pipeline (gh workflow run pipeline), qui sert à mesurer le RTO.
+#   gh workflow run reprise -f confirmation=supprimer-dev
+name: reprise
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Taper « supprimer-dev » pour confirmer la suppression complète de dev
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency: {group: deploiement-dev, cancel-in-progress: false}
+
+jobs:
+  suppression:
+    name: Suppression complète de dev
+    if: inputs.confirmation == 'supprimer-dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 90
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'eu-north-1' }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with: {python-version: "3.12"}
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Suppression des piles portail-dev-* (ordre inverse)
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+          pip install -q boto3
+          bash scripts/supprimer_env.sh dev | tee -a "$GITHUB_STEP_SUMMARY"
