@@ -22,6 +22,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Nom DNS de l'ALB cree par le controleur Kubernetes (fourni par la pipeline)
+  DomaineCdn:
+    Type: String
+    Default: ""
+    Description: Domaine de la distribution CloudFront (sprint 11) ; l'ALB n'est alors joignable que par CloudFront
   CleDnssecArn:
     Type: String
     Default: ""
@@ -34,6 +38,7 @@ Parameters:
 Conditions:
   CreerDns: !Equals [!Ref AvecDns, "true"]
   AvecAlb: !And [!Condition CreerDns, !Not [!Equals [!Ref AlbDns, ""]]]
+  ViaCdn: !Not [!Equals [!Ref DomaineCdn, ""]]
   AvecDnssec: !And [!Condition CreerDns, !Not [!Equals [!Ref CleDnssecArn, ""]]]
 
 Resources:
@@ -90,7 +95,7 @@ Resources:
     Properties:
       HealthCheckConfig:
         Type: HTTPS
-        FullyQualifiedDomainName: !Ref AlbDns
+        FullyQualifiedDomainName: !If [ViaCdn, !Ref DomaineCdn, !Ref AlbDns]
         ResourcePath: /health
         Port: 443
         RequestInterval: 10
@@ -112,7 +117,7 @@ Resources:
       SetIdentifier: principal-alb
       Failover: PRIMARY
       HealthCheckId: !Ref SurveillanceAlb
-      ResourceRecords: [!Ref AlbDns]
+      ResourceRecords: [!If [ViaCdn, !Ref DomaineCdn, !Ref AlbDns]]
 
   PortailSecours:
     Type: AWS::Route53::RecordSet
