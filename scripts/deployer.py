@@ -50,6 +50,13 @@ def pile_existe(cfn, pile: str) -> bool:
     """
     try:
         etat = cfn.describe_stacks(StackName=pile)["Stacks"][0]["StackStatus"]
+        # opération encore en cours (retour arrière, nettoyage) : attendre un état stable
+        for _ in range(90):
+            if not etat.endswith("_IN_PROGRESS") or etat == "REVIEW_IN_PROGRESS":
+                break
+            print(f"   {pile} en {etat} : attente d'un état stable")
+            time.sleep(10)
+            etat = cfn.describe_stacks(StackName=pile)["Stacks"][0]["StackStatus"]
     except ClientError:
         return False
     if etat == "ROLLBACK_COMPLETE":

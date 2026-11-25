@@ -4,6 +4,8 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 const URL = __ENV.URL_CIBLE;
+// jeton d'exemption de la limitation de débit du WAF (fourni par la pipeline, jamais versionné)
+const PARAMS = { headers: { 'x-test-charge': __ENV.JETON_CHARGE || '' } };
 
 export const options = {
   insecureSkipTLSVerify: true,
@@ -26,9 +28,9 @@ export const options = {
 
 export default function () {
   const reponses = http.batch([
-    ['GET', `${URL}/`],
-    ['GET', `${URL}/api/health`],
-    ['GET', `${URL}/api/portefeuilles`],
+    ['GET', `${URL}/`, null, PARAMS],
+    ['GET', `${URL}/api/health`, null, PARAMS],
+    ['GET', `${URL}/api/portefeuilles`, null, PARAMS],
   ]);
   check(reponses[0], { 'accueil 200': (r) => r.status === 200 });
   check(reponses[1], { 'api 200': (r) => r.status === 200 });
