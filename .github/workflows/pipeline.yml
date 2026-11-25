@@ -190,6 +190,8 @@ jobs:
     needs: construction
     runs-on: ubuntu-latest
     environment: dev
+    outputs:
+      url: ${{ steps.k8s.outputs.url }}
     permissions:
       contents: read
       id-token: write
@@ -236,6 +238,7 @@ jobs:
       - name: Associations TGW des VPN et de Direct Connect (sprints 7 et 8)
         run: bash scripts/associer_tgw.sh dev
       - name: Kubernetes (contrôleur ALB, certificat, application au digest signé)
+        id: k8s
         env:
           CLUSTER: eks-portail-dev-ADSN
           DIGEST: ${{ needs.construction.outputs.digest }}
@@ -284,6 +287,7 @@ jobs:
             echo "CloudFront : $URL" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
           for i in $(seq 1 60); do curl -skf "$URL/api/health" && break; sleep 10; done
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
           echo; bash tests/connectivite/verifier.sh "$URL" | tee -a "$GITHUB_STEP_SUMMARY"
           # sprint 10 : surveillance et bascule DNS (aucun changement si déjà en place)
           for t in templates/10-dns.yaml templates/11-cloudfront.yaml templates/12-supervision.yaml; do
@@ -305,30 +309,61 @@ jobs:
   tests-dynamiques:
     name: 5 · Tests dynamiques et performance
     needs: deploiement-dev
-    # Runner auto-hébergé dans le VPC (les runners GitHub n'atteignent pas les ressources privées)
-    runs-on: [self-hosted, leman-vpc]
-    if: vars.RUNNER_VPC == 'true'
+    # Le portail est public par CloudFront (l'ALB n'accepte que CloudFront) : runner GitHub, trafic réel
+    # de visiteur. Le jeton x-test-charge exempte ces tests de la seule limitation de débit du WAF.
+    if: needs.deploiement-dev.outputs.url != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      URL_CIBLE: ${{ needs.deploiement-dev.outputs.url }}
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Connectivité
-        run: bash tests/connectivite/verifier.sh "${{ vars.URL_DEV }}"
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Jeton des tests de charge (Secrets Manager, masqué)
+        run: |
+          JETON=$(aws secretsmanager get-secret-value --secret-id portail/dev/jeton-charge --query SecretString --output text)
+          echo "::add-mask::$JETON"
+          echo "JETON_CHARGE=$JETON" >> "$GITHUB_ENV"
+      - name: Connectivité (via CloudFront)
+        run: bash tests/connectivite/verifier.sh "$URL_CIBLE" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: OWASP ZAP baseline (DAST)
         uses: zaproxy/action-baseline@v0.15.0
+        env:
+          ZAP_AUTH_HEADER: x-test-charge
+          ZAP_AUTH_HEADER_VALUE: ${{ env.JETON_CHARGE }}
         with:
-          target: ${{ vars.URL_DEV }}
+          target: ${{ env.URL_CIBLE }}
           rules_file_name: tests/dast/zap-regles.tsv
           fail_action: true
           allow_issue_writing: false
-      - name: Charge k6 et SLO (p95 < 500 ms, erreurs < 0,5 %)
-        uses: grafana/k6-action@v0.3.1
-        with:
-          filename: tests/charge/portail.js
-          flags: --summary-export=docs/rapports/k6-dev.json
-        env:
-          URL_CIBLE: ${{ vars.URL_DEV }}
+          artifact_name: rapport-zap-dev
+      - uses: grafana/setup-k6-action@v1.3.0
+      - name: Charge k6 et SLO (p95 < 500 ms, p99 < 1 s, erreurs < 0,5 %)
+        run: |
+          mkdir -p docs/rapports
+          k6 run tests/charge/portail.js --summary-export=docs/rapports/k6-dev.json | tee docs/rapports/k6-dev.txt
+      - name: Lighthouse (performance, accessibilité, bonnes pratiques)
+        run: |
+          npx --yes lighthouse@12.8.2 "$URL_CIBLE/" --quiet --chrome-flags="--headless=new --no-sandbox" \
+            --extra-headers="{\"x-test-charge\":\"$JETON_CHARGE\"}" \
+            --output=json --output=html --output-path=docs/rapports/lighthouse-dev
+          jq -r '.categories[] | "\(.title) : \(.score*100|floor)"' docs/rapports/lighthouse-dev.report.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -e '[.categories.performance.score, .categories.accessibility.score, .categories["best-practices"].score] | all(. >= 0.9)' \
+            docs/rapports/lighthouse-dev.report.json > /dev/null
       - uses: actions/upload-artifact@v7.0.2
         if: always()
-        with: {name: rapports-dev, path: "docs/rapports/\nreport_html.html"}
+        with:
+          name: rapports-dev
+          path: |
+            docs/rapports/
+            report_html.html
+            report_json.json
 
   # ---------------------------------------------------------------- 6
   deploiement-prod:

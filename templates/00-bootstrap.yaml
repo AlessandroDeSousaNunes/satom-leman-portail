@@ -144,6 +144,16 @@ Resources:
                 Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
                 Condition:
                   StringEquals: {kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"}
+              - Sid: JetonTestDeCharge
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub "arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:portail/*/jeton-charge-*"
+              - Sid: DechiffrementJetonTestDeCharge
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                Condition:
+                  StringEquals: {kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"}
               - Sid: CloudFrontInvalidation
                 Effect: Allow
                 Action: [cloudfront:CreateInvalidation, cloudfront:GetDistribution, cloudfront:GetInvalidation]

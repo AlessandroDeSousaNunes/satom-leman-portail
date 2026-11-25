@@ -25,6 +25,23 @@ Conditions:
   CreerWaf: !Equals [!Ref AvecCloudFront, "true"]
 
 Resources:
+  # Jeton des tests de charge de la pipeline (k6, ZAP) : généré, jamais versionné. Les requêtes qui le
+  # portent échappent à la seule limitation de débit (les règles gérées AWS s'appliquent toujours).
+  JetonCharge:
+    Type: AWS::SecretsManager::Secret
+    Condition: CreerWaf
+    Properties:
+      Name: !Sub "portail/${Environnement}/jeton-charge"
+      Description: En-tete x-test-charge des tests dynamiques de la pipeline (exemption de la limitation de debit)
+      KmsKeyId: {"Fn::ImportValue": !Sub "portail-${Environnement}-CleArn"}
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+      Tags:
+        - {Key: Projet, Value: SatomCloudNetwork}
+        - {Key: Equipe, Value: !Ref Equipe}
+        - {Key: Environnement, Value: !Ref Environnement}
+
   JournauxWaf:
     Type: AWS::Logs::LogGroup
     Condition: CreerWaf
@@ -53,6 +70,14 @@ Resources:
               Limit: !Ref LimiteRequetes
               AggregateKeyType: FORWARDED_IP
               ForwardedIPConfig: {HeaderName: X-Forwarded-For, FallbackBehavior: MATCH}
+              ScopeDownStatement:
+                NotStatement:
+                  Statement:
+                    ByteMatchStatement:
+                      FieldToMatch: {SingleHeader: {Name: x-test-charge}}
+                      PositionalConstraint: EXACTLY
+                      SearchString: !Sub "{{resolve:secretsmanager:${JetonCharge}}}"
+                      TextTransformations: [{Priority: 0, Type: NONE}]
           VisibilityConfig: {SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: limitation-debit-ip}
         - Name: aws-reputation-ip
           Priority: 1
