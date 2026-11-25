@@ -129,6 +129,7 @@ Resources:
                   - ecr:CompleteLayerUpload
                   - ecr:PutImage
                   - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
                   - ecr:DescribeImages
                   - ecr:DescribeImageScanFindings
                 Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/portail-*"
